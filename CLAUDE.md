@@ -22,7 +22,9 @@ item is resolved during normal work, delete its entry in the same change.
   files in `user://projects/` (list with preview picture, rename, delete) and the last opened project, `Preferences` app-wide settings in
   `settings.cfg` next to the projects (skip limit, start corner); `palette/` thread colours and Lab matching, `pattern/` the `Pattern`
   resource, `import/` PNG → pattern, `planner/` Danish stitch order (`StitchPlanner` →
-  `StitchStep`s), `stitching/` progress per thread (`StitchSession`, not saved yet) and position hints
+  `StitchStep`s), `stitching/` progress per thread (`StitchSession`), the back of the fabric
+  (`BackSide`: needle holes per step and the thread between them, worked out from the planned
+  steps; drawn mirrored by `PatternView.back_side`) and position hints
   (`PositionHint`: the nearest findable stitch to count from, any colour: the last stitch
   made or the end of a run, never a stitch in the middle of a row of equal stitches), `ui/`
   views (`PatternView` preview and progress mode with the current block's stitch count, `StitchPanel` step guidance, `ProjectBrowser` the
@@ -56,7 +58,7 @@ How to check a change; every fix and feature runs these. Godot binary:
    `$G --path . --resolution 720x1280 -- --projects-dir=<scratch dir> --open=res://samples/hypsi_anhaenger.png --screenshot=<abs path>.png`,
    and again with `1280x720` for landscape; look at the PNGs. Add `--stitch=<DMC code>
    --steps=<n>` for the stitching screen after n confirmed steps, `--max-skip=<n>` to set the
-   skip limit (-1: none), `--start=<top-left|top-right|bottom-left|bottom-right>` the start corner, `--settings` to open the settings dialog, `--projects` the project list. In zsh, pass each user
+   skip limit (-1: none), `--start=<top-left|top-right|bottom-left|bottom-right>` the start corner, `--settings` to open the settings dialog, `--projects` the project list, `--back` the back side while stitching. In zsh, pass each user
    argument as its own word (an unsplit `"$args"` arrives as one argument and is ignored).
 
 Touch input (pan, pinch) and the native file dialog are not covered by these; check them on a

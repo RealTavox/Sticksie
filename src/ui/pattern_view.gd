@@ -1,7 +1,8 @@
 class_name PatternView
 extends Control
 ## Shows a pattern as a grid. Preview mode draws every cell as a coloured square; progress mode
-## draws only the stitched legs plus the current step and its stitch count. Drag to pan; pinch, trackpad or mouse
+## draws only the stitched legs plus the current step and its stitch count; with `back_side` it
+## shows the back instead, mirrored as when the fabric is turned over. Drag to pan; pinch, trackpad or mouse
 ## wheel to zoom; a short tap emits `tapped`.
 
 signal tapped
@@ -40,6 +41,16 @@ const LEG_WIDTH := 0.2
 const LEG_INSET := 0.12
 
 var pattern: Pattern
+## Show the back of the fabric (progress mode only): the thread between the holes, mirrored
+## left to right. Set the thread with show_back().
+var back_side := false:
+	set(value):
+		if value != back_side and pattern != null:
+			# Keep the column in the middle of the view in the middle once mirrored.
+			var middle := size.x / 2.0
+			_origin.x = middle - (pattern.width - (middle - _origin.x) / _cell_px) * _cell_px
+		back_side = value
+		queue_redraw()
 
 var _texture: ImageTexture
 var _colors: Array[Color] = []
@@ -56,6 +67,12 @@ var _cell_px := 10.0
 ## Top left corner of the grid, in local coordinates.
 var _origin := Vector2.ZERO
 var _touches := {}  # touch index -> position
+## The back, from BackSide, in grid units: finished segments per thread, the current step's
+## segments still to stitch, and where threads start and end.
+var _back_lines: Array[PackedVector2Array] = []
+var _back_ghost := PackedVector2Array()
+var _back_starts := PackedVector2Array()
+var _back_ends := PackedVector2Array()
 var _tap_possible := false
 var _tap_start := Vector2.ZERO
 ## Size at the last layout, to keep the centre when the view is resized.
@@ -109,6 +126,17 @@ func clear() -> void:
 	pattern = null
 	_texture = null
 	show_preview()
+
+
+## The back for the back side view; `lines` holds the finished segments per thread index,
+## `ghost` the current step's, `starts` and `ends` the holes where threads begin and end.
+func show_back(lines: Array[PackedVector2Array], ghost: PackedVector2Array,
+		starts: PackedVector2Array, ends: PackedVector2Array) -> void:
+	_back_lines = lines
+	_back_ghost = ghost
+	_back_starts = starts
+	_back_ends = ends
+	queue_redraw()
 
 
 func show_preview() -> void:
@@ -190,7 +218,9 @@ func _draw() -> void:
 	else:
 		draw_texture_rect(_texture, grid_rect, false)
 	_draw_grid(grid_rect)
-	if progress:
+	if progress and back_side:
+		_draw_back()
+	elif progress:
 		_draw_stitches()
 		if _highlight != null:
 			_draw_highlight(_highlight)
@@ -211,7 +241,7 @@ func _draw_grid(grid_rect: Rect2) -> void:
 	var minor := PackedVector2Array()
 	var major := PackedVector2Array()
 	for x in range(1, pattern.width):
-		var px := _origin.x + x * _cell_px
+		var px := _origin.x + _column_x(x) * _cell_px
 		if x % 10 == 0:
 			major.append_array([Vector2(px, grid_rect.position.y), Vector2(px, grid_rect.end.y)])
 		elif _cell_px >= MIN_MINOR_GRID_PX:
@@ -251,6 +281,40 @@ func _draw_stitches() -> void:
 			draw_multiline(PackedVector2Array(lines[thread]), _colors[thread], width)
 
 
+## The back: finished thread per colour, the current step's thread still to stitch as a ghost,
+## small knots where threads start (green) and end (red), and the frame, needle dot, thread
+## markers and stitch count of the current step as on the front.
+func _draw_back() -> void:
+	var cell_width := maxf(LEG_WIDTH * 0.8, 1.0 / _cell_px)
+	# Grid units to screen, mirrored: hole x lands at width - x.
+	draw_set_transform(_origin + Vector2(pattern.width * _cell_px, 0.0), 0.0, Vector2(-_cell_px, _cell_px))
+	for thread in mini(_back_lines.size(), _colors.size()):
+		if not _back_lines[thread].is_empty():
+			draw_multiline(_back_lines[thread], _colors[thread], cell_width)
+	if _highlight != null:
+		var rect := _step_rect(_highlight).grow(maxf(2.0, _cell_px * 0.1))
+		draw_set_transform_matrix(Transform2D.IDENTITY)
+		draw_rect(rect, Color(HIGHLIGHT_COLOR, 0.15))
+		draw_rect(rect, HIGHLIGHT_COLOR, false, 3.0)
+		draw_set_transform(_origin + Vector2(pattern.width * _cell_px, 0.0), 0.0, Vector2(-_cell_px, _cell_px))
+		if not _back_ghost.is_empty():
+			draw_multiline(_back_ghost, Color(_colors[_highlight.thread], GHOST_ALPHA), cell_width * GHOST_WIDTH * 2.0)
+	draw_set_transform_matrix(Transform2D.IDENTITY)
+	var knot := maxf(2.0, _cell_px * 0.14)
+	for hole in _back_starts:
+		draw_circle(_hole_point(hole), knot, THREAD_START_COLOR)
+	for hole in _back_ends:
+		draw_circle(_hole_point(hole), knot, THREAD_END_COLOR)
+	if _highlight != null:
+		draw_circle(_needle_start(_highlight), maxf(3.0, _cell_px * 0.15), HIGHLIGHT_COLOR)
+	if _thread_end.x >= 0:
+		_draw_thread_end(_thread_end)
+	if _highlight != null and _new_thread:
+		_draw_thread_start(_highlight)
+	if _highlight != null:
+		_draw_block_count(_highlight)
+
+
 ## The current step: a frame around its cells, the legs still to stitch as ghosts, and a dot
 ## where the needle comes up first.
 func _draw_highlight(step: StitchStep) -> void:
@@ -266,12 +330,7 @@ func _draw_highlight(step: StitchStep) -> void:
 			ghost.append_array(_top_leg(leg_rect))
 	draw_multiline(ghost, Color(_colors[step.thread], GHOST_ALPHA),
 			maxf(1.0, _cell_px * LEG_WIDTH * GHOST_WIDTH))
-	# Legs come up through the bottom holes: "/" at the bottom left, "\" at the bottom right.
-	var first := _leg_rect(step.cells[0], step.row)
-	var start := first.position + Vector2(0.0, first.size.y)
-	if step.kind == StitchStep.Kind.BACK:
-		start = first.end
-	draw_circle(start, maxf(3.0, _cell_px * 0.15), HIGHLIGHT_COLOR)
+	draw_circle(_needle_start(step), maxf(3.0, _cell_px * 0.15), HIGHLIGHT_COLOR)
 
 
 ## How many stitches the current step has, in a badge just past the end the needle moves
@@ -285,7 +344,8 @@ func _draw_block_count(step: StitchStep) -> void:
 	var text_size := font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size)
 	var radius := maxf(text_size.x, font.get_height(font_size)) * 0.5 + 3.0
 	var offset := radius + 4.0
-	var center := Vector2(rect.position.x - offset if step.direction < 0 else rect.end.x + offset,
+	var towards_left := (step.direction < 0) != back_side
+	var center := Vector2(rect.position.x - offset if towards_left else rect.end.x + offset,
 			rect.get_center().y)
 	draw_circle(center, radius, HIGHLIGHT_COLOR)
 	draw_string(font, center + Vector2(-text_size.x / 2.0, font.get_ascent(font_size) - font.get_height(font_size) / 2.0),
@@ -360,10 +420,7 @@ func _draw_thread_end(cell: Vector2i) -> void:
 ## A new thread starts with this step: a green ring around the needle's first hole, labelled
 ## "neuer Faden".
 func _draw_thread_start(step: StitchStep) -> void:
-	var first := _leg_rect(step.cells[0], step.row)
-	var start := first.position + Vector2(0.0, first.size.y)
-	if step.kind == StitchStep.Kind.BACK:
-		start = first.end
+	var start := _needle_start(step)
 	var radius := maxf(5.0, _cell_px * 0.35)
 	draw_arc(start, radius, 0.0, TAU, 32, THREAD_START_COLOR, maxf(2.0, _cell_px * 0.1))
 	_draw_label(start + Vector2(0.0, radius + 4.0 + _label_size() * 0.8), "neuer Faden", THREAD_START_COLOR)
@@ -388,7 +445,27 @@ func _label_size() -> int:
 
 
 func _cell_rect(x: int, y: int) -> Rect2:
-	return Rect2(_origin + Vector2(x, y) * _cell_px, Vector2.ONE * _cell_px)
+	return Rect2(_origin + Vector2(_column_x(x + 1) if back_side else x, y) * _cell_px, Vector2.ONE * _cell_px)
+
+
+## Where grid line `x` (the left edge of column x) is drawn, in cells from the left: mirrored on
+## the back.
+func _column_x(x: float) -> float:
+	return pattern.width - x if back_side else x
+
+
+## A hole (BackSide grid units) on screen.
+func _hole_point(hole: Vector2) -> Vector2:
+	return _origin + Vector2(_column_x(hole.x), hole.y) * _cell_px
+
+
+## Where the needle comes up first in `step`: on the front at the inset leg end, so the dot sits
+## on the leg ("/" bottom left, "\" bottom right); on the back at the hole itself.
+func _needle_start(step: StitchStep) -> Vector2:
+	if back_side:
+		return _hole_point(BackSide.needle_holes(step)[0])
+	var first := _leg_rect(step.cells[0], step.row)
+	return first.end if step.kind == StitchStep.Kind.BACK else first.position + Vector2(0.0, first.size.y)
 
 
 func _leg_rect(x: int, y: int) -> Rect2:

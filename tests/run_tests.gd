@@ -28,6 +28,7 @@ func _initialize() -> void:
 	_test_format_1_loads()
 	_test_describe_thread()
 	_test_areas_grow_without_holes()
+	_test_back_side()
 	if _failures == 0:
 		print("All tests passed.")
 	else:
@@ -646,3 +647,39 @@ func _test_areas_grow_without_holes() -> void:
 			seen[areas[i]] = true
 		_check(holes == 0, "%s: %d segments start away from the stitched part of their area" % [
 				pattern.thread_codes[thread], holes])
+
+
+## The back of a Danish row stitched to the right and back: short vertical stitches between the
+## holes, joined from one step to the next, and the thread's start and end.
+func _test_back_side() -> void:
+	var half := StitchStep.new(StitchStep.Kind.HALF, 0, 2, PackedInt32Array([1, 2, 3]), 1)
+	_check(BackSide.needle_holes(half) == PackedVector2Array([Vector2(1, 3), Vector2(2, 2),
+			Vector2(2, 3), Vector2(3, 2), Vector2(3, 3), Vector2(4, 2)]), "half stitch holes")
+	_check(BackSide.step_segments(half) == PackedVector2Array([Vector2(2, 2), Vector2(2, 3),
+			Vector2(3, 2), Vector2(3, 3)]), "half pass leaves vertical stitches on the back")
+	var back := StitchStep.new(StitchStep.Kind.BACK, 0, 2, PackedInt32Array([3, 2, 1]), -1)
+	_check(BackSide.step_segments(back, BackSide.last_hole(half)) == PackedVector2Array([
+			Vector2(4, 2), Vector2(4, 3), Vector2(3, 2), Vector2(3, 3), Vector2(2, 2), Vector2(2, 3)]),
+			"return pass joins the half pass and is vertical too")
+	var cross := StitchStep.new(StitchStep.Kind.CROSS, 0, 0, PackedInt32Array([5]), 0)
+	_check(BackSide.step_segments(cross) == PackedVector2Array([Vector2(6, 0), Vector2(6, 1)]),
+			"single cross: one vertical stitch between its legs")
+
+	var pattern := _pattern(["###"])
+	var session := StitchSession.new(pattern)
+	var steps := session.steps(0)
+	_check(BackSide.thread_segments(session, 0).is_empty(), "nothing on the back before stitching")
+	session.advance(0)
+	_check(BackSide.thread_segments(session, 0) == BackSide.step_segments(steps[0]), "first step alone")
+	var ends := BackSide.thread_ends(session, 0)
+	_check(ends.starts == PackedVector2Array([BackSide.needle_holes(steps[0])[0]]) and ends.ends.is_empty(),
+			"thread start marked, no end yet")
+	for i in steps.size() - 1:
+		session.advance(0)
+	var expected := PackedVector2Array()
+	for i in steps.size():
+		expected.append_array(BackSide.step_segments(steps[i],
+				BackSide.last_hole(steps[i - 1]) if i > 0 else Vector2(NAN, NAN)))
+	_check(BackSide.thread_segments(session, 0) == expected, "finished steps are joined")
+	_check(BackSide.thread_ends(session, 0).ends == PackedVector2Array([BackSide.last_hole(steps[-1])]),
+			"finished colour has its thread end")

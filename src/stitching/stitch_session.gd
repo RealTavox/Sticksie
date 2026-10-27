@@ -54,6 +54,10 @@ func done_count(thread: int) -> int:
 	return _flags(thread).count(1)
 
 
+func is_done(thread: int, index: int) -> bool:
+	return _flags(thread)[index] == 1
+
+
 ## Index of the next step of `thread`: the first one not done, or the step count when finished.
 func current_index(thread: int) -> int:
 	var index := _flags(thread).find(0)

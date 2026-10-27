@@ -6,7 +6,7 @@ extends Control
 ## Command line (after `--`): `--projects-dir=<path>` keeps projects in another folder (for test
 ## runs), `--open=<path>` opens an image as a new project, `--max-skip=<n>` sets the skip limit
 ## (-1: none), `--start=<corner>` sets the start corner (top-left, top-right, bottom-left,
-## bottom-right), `--settings` opens the settings dialog, `--projects` the project list, `--stitch=<code>` starts stitching that thread, `--steps=<n>` confirms n steps, `--screenshot=<png path>` saves a screenshot after a few
+## bottom-right), `--settings` opens the settings dialog, `--projects` the project list, `--stitch=<code>` starts stitching that thread, `--steps=<n>` confirms n steps, `--back` shows the back while stitching, `--screenshot=<png path>` saves a screenshot after a few
 ## frames and quits.
 
 const SAMPLE_PATH := "res://samples/hypsi_anhaenger.png"
@@ -41,6 +41,7 @@ var _limit_box: CheckBox
 var _corner_option: OptionButton
 var _limit_spin: SpinBox
 var _overview_button: Button
+var _side_button: Button
 var _info_label: Label
 var _body: BoxContainer
 var _view: PatternView
@@ -96,6 +97,9 @@ func _build_ui() -> void:
 	_overview_button = _make_toolbar_button("◂ Übersicht", _leave_stitching)
 	_overview_button.visible = false
 	toolbar.add_child(_overview_button)
+	_side_button = _make_toolbar_button("Rückseite", _toggle_back_side)
+	_side_button.visible = false
+	toolbar.add_child(_side_button)
 	_info_label = Label.new()
 	_info_label.text = "Öffne ein Pixelart-Bild (PNG). Ein Pixel wird ein Kreuzstich."
 	_info_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -420,6 +424,7 @@ func _enter_stitching(thread: int) -> void:
 	_sample_button.visible = false
 	_projects_button.visible = false
 	_overview_button.visible = true
+	_side_button.visible = true
 	var step := _project.session.current_step(thread)
 	if step != null:
 		_view.focus_step(step, STITCH_CELL_PX)
@@ -437,6 +442,8 @@ func _leave_stitching() -> void:
 	_sample_button.visible = true
 	_projects_button.visible = true
 	_overview_button.visible = false
+	_side_button.visible = false
+	_set_back_side(false)
 	_view.show_preview()
 	_show_info()
 	_fill_color_list()
@@ -465,6 +472,8 @@ func _refresh_stitching() -> void:
 		thread_end = session.last_cell(thread)
 	var new_thread := step != null and thread_start != StitchSession.ThreadStart.NONE
 	_view.show_progress(states, step, hint, thread_end, new_thread)
+	if _view.back_side:
+		_show_back(step)
 	if step != null:
 		_view.ensure_visible(step, hint, thread_end)
 	var floss := _palette.find_code(pattern.thread_codes[thread])
@@ -472,6 +481,42 @@ func _refresh_stitching() -> void:
 			session.steps(thread).size(), session.finished_crosses(thread),
 			pattern.stitch_counts()[thread], thread_start)
 	_info_label.text = ""
+
+
+func _toggle_back_side() -> void:
+	_set_back_side(not _view.back_side)
+	if _stitch_thread >= 0:
+		_refresh_stitching()
+
+
+func _set_back_side(back: bool) -> void:
+	_view.back_side = back
+	_side_button.text = "Vorderseite" if back else "Rückseite"
+
+
+## Hands the back of every colour to the view, and the current step's part still to stitch,
+## joined to where the needle is unless a new thread starts. Only worked out while the back is
+## shown, since it goes over every finished step.
+func _show_back(step: StitchStep) -> void:
+	var session := _project.session
+	var lines: Array[PackedVector2Array] = []
+	var starts := PackedVector2Array()
+	var ends := PackedVector2Array()
+	for thread in _project.pattern.thread_codes.size():
+		lines.append(BackSide.thread_segments(session, thread))
+		var marks := BackSide.thread_ends(session, thread)
+		starts.append_array(marks.starts)
+		ends.append_array(marks.ends)
+	var ghost := PackedVector2Array()
+	if step != null:
+		var thread := _stitch_thread
+		var index := session.current_index(thread)
+		var from := Vector2(NAN, NAN)
+		if (index > 0 and session.is_done(thread, index - 1)
+				and session.thread_start(thread, index) == StitchSession.ThreadStart.NONE):
+			from = BackSide.last_hole(session.steps(thread)[index - 1])
+		ghost = BackSide.step_segments(step, from)
+	_view.show_back(lines, ghost, starts, ends)
 
 
 func _next_step() -> void:
@@ -503,6 +548,7 @@ func _handle_cmdline() -> void:
 	var screenshot_path := ""
 	var stitch_code := ""
 	var steps := 0
+	var back := false
 	for arg in OS.get_cmdline_user_args():
 		if arg.begins_with("--open="):
 			_open_image(arg.trim_prefix("--open="))
@@ -512,6 +558,8 @@ func _handle_cmdline() -> void:
 			steps = arg.trim_prefix("--steps=").to_int()
 		elif arg == "--settings":
 			_show_settings.call_deferred()
+		elif arg == "--back":
+			back = true
 		elif arg == "--projects":
 			_show_projects.call_deferred()
 		elif arg.begins_with("--max-skip="):
@@ -530,6 +578,8 @@ func _handle_cmdline() -> void:
 		_enter_stitching(_project.pattern.thread_codes.find(stitch_code))
 		for i in steps:
 			_next_step()
+		if back:
+			_toggle_back_side()
 	if screenshot_path.is_empty():
 		return
 	for i in 3:
