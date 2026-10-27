@@ -18,23 +18,33 @@ item is resolved during normal work, delete its entry in the same change.
 
 ### Code scope
 
-- Project code: all `*.gd`, `*.tscn`, `*.tres`, `*.gdshader` in the repo, plus `project.godot`.
-  (No code yet; update this once the folder layout exists.)
-- Generated / not project code: `.godot/`, `*.import` files. (Hands-off paths are in
-  `USER_WORKFLOW.md`.)
+- Project code: `src/` (`palette/` thread colours and Lab matching, `pattern/` the `Pattern`
+  resource, `import/` PNG → pattern, `ui/` views, `main.tscn`/`main.gd` the start screen),
+  `tests/run_tests.gd`, plus `project.godot` and the `*.import` files next to resources (they
+  hold import settings: `data/threads/dmc-floss.csv` uses the "keep" importer so it isn't
+  turned into a translation, `samples/*.png` use the "image" importer so `load()` returns an
+  exact `Image`).
+- Data: `data/threads/dmc-floss.csv` (DMC palette, CC BY 4.0, source and credit in
+  `data/threads/SOURCE.md`; the credit must stay visible in the app). `samples/` holds test
+  images.
+- Generated / not project code: `.godot/`. (Hands-off paths are in `USER_WORKFLOW.md`.)
 - List paths are relative to the repo root.
 
 ### Verification
 
 How to check a change; every fix and feature runs these. Godot binary:
-`/Applications/Godot.app/Contents/MacOS/Godot` (4.7.2).
+`/Applications/Godot.app/Contents/MacOS/Godot` (4.7.2), called `$G` below.
 
-1. `/Applications/Godot.app/Contents/MacOS/Godot --headless --path . --import 2>&1 | grep -E "ERROR|WARNING|SCRIPT ERROR"`:
-   no new errors or warnings (parses every script and imports resources).
-2. Once a main scene exists: `/Applications/Godot.app/Contents/MacOS/Godot --headless --path . --quit-after 120 2>&1 | grep -E "ERROR|SCRIPT ERROR"`:
-   the app starts and runs a few frames without errors.
-3. Manual: run the project in the Godot editor and look at the changed screen; there is no
-   automated visual check yet.
+1. `$G --headless --path . --import 2>&1 | grep -E "ERROR|WARNING"`: no output (parses every
+   script and imports resources; run it first after adding a `class_name`).
+2. `$G --headless --path . --script res://tests/run_tests.gd`: prints "All tests passed."
+   and exits 0. Plain checks without a framework (Lab/CIEDE2000 against Sharma's reference
+   pairs, DMC palette, importing the sample).
+3. `$G --headless --path . --quit-after 120 -- --open=res://samples/hypsi_anhaenger.png 2>&1 | grep -E "ERROR|WARNING"`:
+   no output.
+4. Screenshot (opens a window for a moment):
+   `$G --path . --resolution 720x1280 -- --open=res://samples/hypsi_anhaenger.png --screenshot=<abs path>.png`,
+   and again with `1280x720` for landscape; look at the PNGs.
 
-No test framework yet, so planner and colour-matching logic are only checked by running the
-app; reports must say so.
+Touch input (pan, pinch) and the native file dialog are not covered by these; check them on a
+device or in the editor and say so in the report.
