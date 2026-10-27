@@ -6,7 +6,9 @@ extends Control
 ## Command line (after `--`): `--projects-dir=<path>` keeps projects in another folder (for test
 ## runs), `--open=<path>` opens an image as a new project, `--max-skip=<n>` sets the skip limit
 ## (-1: none), `--start=<corner>` sets the start corner (top-left, top-right, bottom-left,
-## bottom-right), `--settings` opens the settings dialog, `--projects` the project list, `--stitch=<code>` starts stitching that thread, `--steps=<n>` confirms n steps, `--back` shows the back while stitching, `--screenshot=<png path>` saves a screenshot after a few
+## bottom-right), `--settings` opens the settings dialog (`--advanced`: with the advanced part open),
+## `--method=<english|danish>` sets the stitch method, `--needle=<auto|bottom|top>` and
+## `--first-leg=<slash|backslash>` the stitch style (bottom/top/first-leg fix it), `--projects` the project list, `--stitch=<code>` starts stitching that thread, `--steps=<n>` confirms n steps, `--back` shows the back while stitching, `--screenshot=<png path>` saves a screenshot after a few
 ## frames and quits.
 
 const SAMPLE_PATH := "res://samples/hypsi_anhaenger.png"
@@ -23,6 +25,17 @@ const START_CORNERS := [
 	["Unten links: Reihen nach rechts, dann nach oben", false, true],
 	["Unten rechts: Reihen nach links, dann nach oben", false, false],
 ]
+const METHODS := [
+	"Dänisch: erst die Halbstiche einer Reihe, dann zurück die Gegenstiche",
+	"Englisch: jedes Kreuz gleich ganz fertig, eins nach dem anderen",
+]
+const NEEDLE_MODES := [
+	"Automatisch: so, dass die Rückseite am saubersten wird (empfohlen)",
+	"Fest: Reihenfolge und Richtung selbst wählen",
+]
+const LEG_ORDERS := ["Erst / dann \\", "Erst \\ dann /"]
+const NEEDLE_STARTS := ["Nadel immer unten hoch (Schenkel von unten nach oben)",
+		"Nadel immer oben hoch (Schenkel von oben nach unten)"]
 const CREDIT := "Garnfarben: craft-color-codes von MakeBead (makebead.com), CC BY 4.0"
 
 var _palette: FlossPalette
@@ -31,6 +44,7 @@ var _project: StitchProject
 var _full_pattern: Pattern
 ## Thread index in the project's pattern being stitched, or -1 on the overview.
 var _stitch_thread := -1
+var _style := StitchStyle.new()
 
 var _open_button: Button
 var _sample_button: Button
@@ -40,6 +54,12 @@ var _settings_dialog: AcceptDialog
 var _limit_box: CheckBox
 var _corner_option: OptionButton
 var _limit_spin: SpinBox
+var _method_option: OptionButton
+var _advanced_button: Button
+var _advanced_box: VBoxContainer
+var _needle_option: OptionButton
+var _leg_option: OptionButton
+var _needle_start_option: OptionButton
 var _overview_button: Button
 var _side_button: Button
 var _info_label: Label
@@ -61,6 +81,7 @@ func _ready() -> void:
 		if arg.begins_with("--projects-dir="):
 			ProjectStore.directory = arg.trim_prefix("--projects-dir=")
 		opens_image = opens_image or arg.begins_with("--open=")
+	_apply_style()
 	if not opens_image:
 		var last := ProjectStore.last_project_path()
 		if not last.is_empty() and FileAccess.file_exists(last):
@@ -157,13 +178,16 @@ func _build_settings_dialog() -> void:
 	add_child(_settings_dialog)
 	var content := VBoxContainer.new()
 	_settings_dialog.add_child(content)
+	var method_label := Label.new()
+	method_label.text = "Stichmethode:"
+	content.add_child(method_label)
+	_method_option = _make_option(METHODS)
+	content.add_child(_method_option)
+	content.add_child(HSeparator.new())
 	var corner_label := Label.new()
 	corner_label.text = "Anfangen in der Ecke:"
 	content.add_child(corner_label)
-	_corner_option = OptionButton.new()
-	_corner_option.custom_minimum_size.y = BUTTON_HEIGHT
-	for corner: Array in START_CORNERS:
-		_corner_option.add_item(corner[0])
+	_corner_option = _make_option(START_CORNERS.map(func(corner: Array) -> String: return corner[0]))
 	content.add_child(_corner_option)
 	var corner_note := Label.new()
 	corner_note.text = ("Fläche für Fläche: Die Ecke bestimmt, wo es losgeht und welcher Abschnitt\n"
@@ -192,6 +216,62 @@ func _build_settings_dialog() -> void:
 	note.modulate.a = 0.7
 	content.add_child(note)
 	_limit_box.toggled.connect(func(on: bool) -> void: _limit_spin.editable = on)
+	content.add_child(HSeparator.new())
+	_build_advanced_settings(content)
+
+
+## The advanced part, closed at first so the dialog stays short: how each cross is worked.
+func _build_advanced_settings(content: VBoxContainer) -> void:
+	_advanced_button = Button.new()
+	_advanced_button.toggle_mode = true
+	_advanced_button.flat = true
+	_advanced_button.alignment = HORIZONTAL_ALIGNMENT_LEFT
+	_advanced_button.custom_minimum_size.y = BUTTON_HEIGHT
+	_advanced_button.toggled.connect(_show_advanced)
+	content.add_child(_advanced_button)
+	_advanced_box = VBoxContainer.new()
+	content.add_child(_advanced_box)
+	var needle_label := Label.new()
+	needle_label.text = "Stichführung (welcher Schenkel zuerst, wo die Nadel hochkommt):"
+	_advanced_box.add_child(needle_label)
+	_needle_option = _make_option(NEEDLE_MODES)
+	_needle_option.item_selected.connect(func(_index: int) -> void: _update_needle_options())
+	_advanced_box.add_child(_needle_option)
+	_leg_option = _make_option(LEG_ORDERS)
+	_advanced_box.add_child(_leg_option)
+	_needle_start_option = _make_option(NEEDLE_STARTS)
+	_advanced_box.add_child(_needle_start_option)
+	var note := Label.new()
+	note.text = ("Automatisch: erst /, dann \\. Die Nadel kommt immer so hoch, dass auf der Rückseite\n"
+			+ "nur kurze senkrechte Stiche bleiben, in beide Richtungen.\n"
+			+ "Fest: jeder Schenkel genau so, wie gewählt. Auf der Rückseite kann der Faden dann\n"
+			+ "schräg über zwei Felder laufen. Nicht mitten im Projekt wechseln, sonst liegen die\n"
+			+ "oberen Schenkel nicht mehr gleich.")
+	note.modulate.a = 0.7
+	_advanced_box.add_child(note)
+	_show_advanced(false)
+
+
+func _show_advanced(open: bool) -> void:
+	_advanced_button.set_pressed_no_signal(open)
+	_advanced_button.text = ("▾ " if open else "▸ ") + "Erweitert"
+	_advanced_box.visible = open
+	_settings_dialog.reset_size()
+
+
+## Leg order and needle start only count for a fixed style.
+func _update_needle_options() -> void:
+	var fixed := _needle_option.selected == 1
+	_leg_option.disabled = not fixed
+	_needle_start_option.disabled = not fixed
+
+
+func _make_option(items: Array) -> OptionButton:
+	var option := OptionButton.new()
+	option.custom_minimum_size.y = BUTTON_HEIGHT
+	for item: String in items:
+		option.add_item(item)
+	return option
 
 
 func _make_toolbar_button(text: String, on_pressed: Callable) -> Button:
@@ -250,6 +330,11 @@ func _show_settings() -> void:
 	if limit != StitchPlanner.UNLIMITED:
 		_limit_spin.value = limit
 	_corner_option.selected = _corner_index(Preferences.top_to_bottom(), Preferences.start_left())
+	_method_option.selected = 1 if Preferences.english() else 0
+	_needle_option.selected = 1 if Preferences.needle_fixed() else 0
+	_leg_option.selected = 0 if Preferences.slash_first() else 1
+	_needle_start_option.selected = 1 if Preferences.needle_from_top() else 0
+	_update_needle_options()
 	_settings_dialog.popup_centered()
 
 
@@ -264,6 +349,10 @@ func _apply_settings() -> void:
 	Preferences.set_max_skip(limit)
 	var corner: Array = START_CORNERS[_corner_option.selected]
 	Preferences.set_direction(corner[1], corner[2])
+	Preferences.set_english(_method_option.selected == 1)
+	Preferences.set_stitch_style(_needle_option.selected == 1, _leg_option.selected == 0,
+			_needle_start_option.selected == 1)
+	_apply_style()
 	if _project == null:
 		return
 	_apply_preferences()
@@ -278,6 +367,14 @@ func _apply_settings() -> void:
 func _apply_preferences() -> void:
 	_project.session.set_max_skip(Preferences.max_skip())
 	_project.session.set_direction(Preferences.top_to_bottom(), Preferences.start_left())
+	_project.session.set_english(Preferences.english())
+
+
+## Hands the leg order and needle holes from the preferences to the view and the guide texts.
+func _apply_style() -> void:
+	_style = StitchStyle.from_preferences()
+	_view.style = _style
+	_stitch_panel.style = _style
 
 
 func _open_project(path: String) -> void:
@@ -461,7 +558,7 @@ func _refresh_stitching() -> void:
 	if step != null:
 		hint = PositionHint.find(pattern, states, step, session.last_cell(thread))
 		thread_start = session.thread_start(thread, session.current_index(thread))
-		position_text = StitchPanel.describe_position(step, hint, pattern, states)
+		position_text = StitchPanel.describe_position(step, hint, pattern, states, _style)
 		var thread_text := StitchPanel.describe_thread(step, thread_start, session.max_skip)
 		if not thread_text.is_empty():
 			position_text = thread_text + "\n" + position_text
@@ -503,8 +600,8 @@ func _show_back(step: StitchStep) -> void:
 	var starts := PackedVector2Array()
 	var ends := PackedVector2Array()
 	for thread in _project.pattern.thread_codes.size():
-		lines.append(BackSide.thread_segments(session, thread))
-		var marks := BackSide.thread_ends(session, thread)
+		lines.append(BackSide.thread_segments(session, thread, _style))
+		var marks := BackSide.thread_ends(session, thread, _style)
 		starts.append_array(marks.starts)
 		ends.append_array(marks.ends)
 	var ghost := PackedVector2Array()
@@ -514,8 +611,8 @@ func _show_back(step: StitchStep) -> void:
 		var from := Vector2(NAN, NAN)
 		if (index > 0 and session.is_done(thread, index - 1)
 				and session.thread_start(thread, index) == StitchSession.ThreadStart.NONE):
-			from = BackSide.last_hole(session.steps(thread)[index - 1])
-		ghost = BackSide.step_segments(step, from)
+			from = BackSide.last_hole(session.steps(thread)[index - 1], _style)
+		ghost = BackSide.step_segments(step, _style, from)
 	_view.show_back(lines, ghost, starts, ends)
 
 
@@ -558,6 +655,20 @@ func _handle_cmdline() -> void:
 			steps = arg.trim_prefix("--steps=").to_int()
 		elif arg == "--settings":
 			_show_settings.call_deferred()
+		elif arg == "--advanced":
+			_show_advanced.call_deferred(true)
+		elif arg.begins_with("--method="):
+			Preferences.set_english(arg.trim_prefix("--method=") == "english")
+			if _project != null:
+				_apply_preferences()
+		elif arg.begins_with("--needle="):
+			var needle := arg.trim_prefix("--needle=")
+			Preferences.set_stitch_style(needle != "auto", Preferences.slash_first(), needle == "top")
+			_apply_style()
+		elif arg.begins_with("--first-leg="):
+			Preferences.set_stitch_style(true, arg.trim_prefix("--first-leg=") == "slash",
+					Preferences.needle_from_top())
+			_apply_style()
 		elif arg == "--back":
 			back = true
 		elif arg == "--projects":

@@ -8,7 +8,8 @@ enum Kind {
 	HALF,
 	## Danish return pass: the top legs, completing the crosses.
 	BACK,
-	## A single full cross (scattered stitch, Danish doesn't pay off).
+	## Whole crosses, each finished before the next: a single scattered stitch (Danish doesn't
+	## pay off), or a block of the English method.
 	CROSS,
 }
 

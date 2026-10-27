@@ -74,6 +74,10 @@ func _init() -> void:
 ## `step` is null when the thread is finished; `position_text` comes from describe_position();
 ## `step_index` counts the finished steps; `thread_start` says whether the step begins with a new
 ## thread.
+## Leg order and needle holes the texts describe.
+var style := StitchStyle.new()
+
+
 func show_step(floss: FlossColor, step: StitchStep, position_text: String, step_index: int,
 		step_count: int, crosses_done: int, cross_count: int,
 		thread_start := StitchSession.ThreadStart.NONE) -> void:
@@ -83,7 +87,7 @@ func show_step(floss: FlossColor, step: StitchStep, position_text: String, step_
 		_step_label.text = "Fertig!"
 		_detail_label.text = "Alle %d Kreuze in dieser Farbe sind gestickt. Faden auf der Rückseite vernähen." % cross_count
 	else:
-		_step_label.text = describe_step(step)
+		_step_label.text = describe_step(step, style)
 		_detail_label.text = position_text
 	_progress_bar.max_value = maxi(step_count, 1)
 	_progress_bar.value = step_index
@@ -97,16 +101,20 @@ func show_step(floss: FlossColor, step: StitchStep, position_text: String, step_
 	_new_thread_button.set_pressed_no_signal(thread_start != StitchSession.ThreadStart.NONE)
 
 
-static func describe_step(step: StitchStep) -> String:
+static func describe_step(step: StitchStep, style: StitchStyle) -> String:
 	var count := step.cells.size()
 	var side := "rechts" if step.direction > 0 else "links"
 	match step.kind:
 		StitchStep.Kind.HALF:
-			return "%d %s nach %s  ( / )" % [count, "Halbstich" if count == 1 else "Halbstiche", side]
+			return "%d %s nach %s  ( %s )" % [count, "Halbstich" if count == 1 else "Halbstiche", side,
+					style.leg_symbol(true)]
 		StitchStep.Kind.BACK:
-			return "Zurück: %d %s nach %s  ( \\ )" % [count, "Gegenstich" if count == 1 else "Gegenstiche", side]
+			return "Zurück: %d %s nach %s  ( %s )" % [count, "Gegenstich" if count == 1 else "Gegenstiche",
+					side, style.leg_symbol(false)]
 		_:
-			return "Ein einzelnes ganzes Kreuz  ( X )"
+			if count == 1:
+				return "Ein einzelnes ganzes Kreuz  ( X )"
+			return "%d ganze Kreuze nach %s  ( X )" % [count, side]
 
 
 ## What happens with the thread before the step: a new one (and why), or how far to carry the
@@ -132,7 +140,7 @@ static func describe_thread(step: StitchStep, thread_start: StitchSession.Thread
 ## over its own half stitches for a return pass, or freely chosen for the very first stitch.
 ## `states` are the cell states before the step.
 static func describe_position(step: StitchStep, hint: PositionHint, pattern: Pattern,
-		states: PackedByteArray) -> String:
+		states: PackedByteArray, style: StitchStyle) -> String:
 	var text := ""
 	if step.kind == StitchStep.Kind.BACK:
 		text = "Auf den eigenen Halbstichen zurück."
@@ -143,15 +151,27 @@ static func describe_position(step: StitchStep, hint: PositionHint, pattern: Pat
 				step.row, "Reihe" if step.row == 1 else "Reihen", pattern.width, pattern.height]
 	else:
 		text = describe_offset(hint.offset(), describe_reference(hint, pattern, states))
+	var corner := describe_corner(step, style)
 	match step.kind:
 		StitchStep.Kind.HALF:
-			text += "\nNadel unten links im ersten Feld hoch (Punkt)."
+			text += "\nNadel %s im ersten Feld hoch (Punkt)." % corner
 		StitchStep.Kind.BACK:
-			text += "\nNadel unten rechts im ersten Feld hoch (Punkt), die Kreuze werden fertig."
+			text += "\nNadel %s im ersten Feld hoch (Punkt), die Kreuze werden fertig." % corner
 		_:
-			text += "\nErst / dann \\, Nadel unten links hoch (Punkt)."
+			text += "\n%sErst %s dann %s, Nadel %s hoch (Punkt)." % [
+					"Jedes Kreuz gleich ganz fertig. " if step.cells.size() > 1 else "",
+					style.leg_symbol(true), style.leg_symbol(false),
+					corner + (" im ersten Feld" if step.cells.size() > 1 else "")]
 	text += "\n(Reihe %d, Feld %d des Musters)" % [step.row + 1, step.cells[0] + 1]
 	return text
+
+
+## Where the needle comes up first in `step`, e.g. "oben rechts": the corner of the first cell
+## that StitchStyle picks.
+static func describe_corner(step: StitchStep, style: StitchStyle) -> String:
+	var hole := style.needle_holes(step)[0]
+	return "%s %s" % ["oben" if int(hole.y) == step.row else "unten",
+			"links" if int(hole.x) == step.cells[0] else "rechts"]
 
 
 ## The reference stitch in the dative, saying what makes it findable, e.g. "dem markierten Kreuz

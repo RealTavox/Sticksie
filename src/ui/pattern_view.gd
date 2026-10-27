@@ -43,6 +43,11 @@ const LEG_INSET := 0.12
 var pattern: Pattern
 ## Show the back of the fabric (progress mode only): the thread between the holes, mirrored
 ## left to right. Set the thread with show_back().
+## Leg order and where the needle comes up.
+var style := StitchStyle.new():
+	set(value):
+		style = value
+		queue_redraw()
 var back_side := false:
 	set(value):
 		if value != back_side and pattern != null:
@@ -272,9 +277,9 @@ func _draw_stitches() -> void:
 				continue
 			var leg_rect := _leg_rect(x, y)
 			var thread_lines: Array = lines[pattern.get_cell(x, y)]
-			thread_lines.append_array(_bottom_leg(leg_rect))
+			thread_lines.append_array(_leg(leg_rect, true))
 			if state == StitchSession.Cell.FULL:
-				thread_lines.append_array(_top_leg(leg_rect))
+				thread_lines.append_array(_leg(leg_rect, false))
 	var width := maxf(1.0, _cell_px * LEG_WIDTH)
 	for thread in lines.size():
 		if not lines[thread].is_empty():
@@ -325,9 +330,9 @@ func _draw_highlight(step: StitchStep) -> void:
 	for x in step.cells:
 		var leg_rect := _leg_rect(x, step.row)
 		if step.kind != StitchStep.Kind.BACK:
-			ghost.append_array(_bottom_leg(leg_rect))
+			ghost.append_array(_leg(leg_rect, true))
 		if step.kind != StitchStep.Kind.HALF:
-			ghost.append_array(_top_leg(leg_rect))
+			ghost.append_array(_leg(leg_rect, false))
 	draw_multiline(ghost, Color(_colors[step.thread], GHOST_ALPHA),
 			maxf(1.0, _cell_px * LEG_WIDTH * GHOST_WIDTH))
 	draw_circle(_needle_start(step), maxf(3.0, _cell_px * 0.15), HIGHLIGHT_COLOR)
@@ -459,13 +464,14 @@ func _hole_point(hole: Vector2) -> Vector2:
 	return _origin + Vector2(_column_x(hole.x), hole.y) * _cell_px
 
 
-## Where the needle comes up first in `step`: on the front at the inset leg end, so the dot sits
-## on the leg ("/" bottom left, "\" bottom right); on the back at the hole itself.
+## Where the needle comes up first in `step` (see StitchStyle): on the front at the end of the
+## inset leg, so the dot sits on the leg; on the back at the hole itself.
 func _needle_start(step: StitchStep) -> Vector2:
+	var hole := style.needle_holes(step)[0]
 	if back_side:
-		return _hole_point(BackSide.needle_holes(step)[0])
+		return _hole_point(hole)
 	var first := _leg_rect(step.cells[0], step.row)
-	return first.end if step.kind == StitchStep.Kind.BACK else first.position + Vector2(0.0, first.size.y)
+	return first.position + (hole - Vector2(step.cells[0], step.row)) * first.size
 
 
 func _leg_rect(x: int, y: int) -> Rect2:
@@ -479,13 +485,11 @@ func _step_rect(step: StitchStep) -> Rect2:
 	return rect
 
 
-## Bottom leg "/": from the bottom left to the top right.
-func _bottom_leg(rect: Rect2) -> PackedVector2Array:
-	return PackedVector2Array([Vector2(rect.position.x, rect.end.y), Vector2(rect.end.x, rect.position.y)])
-
-
-## Top leg "\": from the top left to the bottom right.
-func _top_leg(rect: Rect2) -> PackedVector2Array:
+## The first leg (underneath) or the second (on top) in `rect`: "/" from the bottom left to the
+## top right, "\" from the top left to the bottom right, in the order of `style`.
+func _leg(rect: Rect2, first: bool) -> PackedVector2Array:
+	if first == style.slash_first:
+		return PackedVector2Array([Vector2(rect.position.x, rect.end.y), Vector2(rect.end.x, rect.position.y)])
 	return PackedVector2Array([rect.position, rect.end])
 
 

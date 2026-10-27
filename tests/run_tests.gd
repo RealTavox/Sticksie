@@ -29,6 +29,8 @@ func _initialize() -> void:
 	_test_describe_thread()
 	_test_areas_grow_without_holes()
 	_test_back_side()
+	_test_stitch_style()
+	_test_english()
 	if _failures == 0:
 		print("All tests passed.")
 	else:
@@ -652,34 +654,94 @@ func _test_areas_grow_without_holes() -> void:
 ## The back of a Danish row stitched to the right and back: short vertical stitches between the
 ## holes, joined from one step to the next, and the thread's start and end.
 func _test_back_side() -> void:
+	var style := StitchStyle.new()
 	var half := StitchStep.new(StitchStep.Kind.HALF, 0, 2, PackedInt32Array([1, 2, 3]), 1)
-	_check(BackSide.needle_holes(half) == PackedVector2Array([Vector2(1, 3), Vector2(2, 2),
+	_check(style.needle_holes(half) == PackedVector2Array([Vector2(1, 3), Vector2(2, 2),
 			Vector2(2, 3), Vector2(3, 2), Vector2(3, 3), Vector2(4, 2)]), "half stitch holes")
-	_check(BackSide.step_segments(half) == PackedVector2Array([Vector2(2, 2), Vector2(2, 3),
+	_check(BackSide.step_segments(half, style) == PackedVector2Array([Vector2(2, 2), Vector2(2, 3),
 			Vector2(3, 2), Vector2(3, 3)]), "half pass leaves vertical stitches on the back")
 	var back := StitchStep.new(StitchStep.Kind.BACK, 0, 2, PackedInt32Array([3, 2, 1]), -1)
-	_check(BackSide.step_segments(back, BackSide.last_hole(half)) == PackedVector2Array([
+	_check(BackSide.step_segments(back, style, BackSide.last_hole(half, style)) == PackedVector2Array([
 			Vector2(4, 2), Vector2(4, 3), Vector2(3, 2), Vector2(3, 3), Vector2(2, 2), Vector2(2, 3)]),
 			"return pass joins the half pass and is vertical too")
 	var cross := StitchStep.new(StitchStep.Kind.CROSS, 0, 0, PackedInt32Array([5]), 0)
-	_check(BackSide.step_segments(cross) == PackedVector2Array([Vector2(6, 0), Vector2(6, 1)]),
+	_check(BackSide.step_segments(cross, style) == PackedVector2Array([Vector2(6, 0), Vector2(6, 1)]),
 			"single cross: one vertical stitch between its legs")
 
 	var pattern := _pattern(["###"])
 	var session := StitchSession.new(pattern)
 	var steps := session.steps(0)
-	_check(BackSide.thread_segments(session, 0).is_empty(), "nothing on the back before stitching")
+	_check(BackSide.thread_segments(session, 0, style).is_empty(), "nothing on the back before stitching")
 	session.advance(0)
-	_check(BackSide.thread_segments(session, 0) == BackSide.step_segments(steps[0]), "first step alone")
-	var ends := BackSide.thread_ends(session, 0)
-	_check(ends.starts == PackedVector2Array([BackSide.needle_holes(steps[0])[0]]) and ends.ends.is_empty(),
+	_check(BackSide.thread_segments(session, 0, style) == BackSide.step_segments(steps[0], style),
+			"first step alone")
+	var ends := BackSide.thread_ends(session, 0, style)
+	_check(ends.starts == PackedVector2Array([style.needle_holes(steps[0])[0]]) and ends.ends.is_empty(),
 			"thread start marked, no end yet")
 	for i in steps.size() - 1:
 		session.advance(0)
 	var expected := PackedVector2Array()
 	for i in steps.size():
-		expected.append_array(BackSide.step_segments(steps[i],
-				BackSide.last_hole(steps[i - 1]) if i > 0 else Vector2(NAN, NAN)))
-	_check(BackSide.thread_segments(session, 0) == expected, "finished steps are joined")
-	_check(BackSide.thread_ends(session, 0).ends == PackedVector2Array([BackSide.last_hole(steps[-1])]),
+		expected.append_array(BackSide.step_segments(steps[i], style,
+				BackSide.last_hole(steps[i - 1], style) if i > 0 else Vector2(NAN, NAN)))
+	_check(BackSide.thread_segments(session, 0, style) == expected, "finished steps are joined")
+	_check(BackSide.thread_ends(session, 0, style).ends == PackedVector2Array([BackSide.last_hole(steps[-1], style)]),
 			"finished colour has its thread end")
+
+
+## Automatic: the needle comes up where the back stays shortest, so every Danish pass leaves only
+## vertical stitches, to the left as well (the diagonal stitches of a fixed "up at the bottom").
+## Fixed: exactly the chosen holes and leg order.
+func _test_stitch_style() -> void:
+	var auto := StitchStyle.new()
+	var left := StitchStep.new(StitchStep.Kind.HALF, 0, 0, PackedInt32Array([3, 2]), -1)
+	_check(auto.needle_holes(left) == PackedVector2Array([Vector2(4, 0), Vector2(3, 1),
+			Vector2(3, 0), Vector2(2, 1)]), "auto: half pass to the left comes up top right")
+	_check(StitchPanel.describe_corner(left, auto) == "oben rechts", StitchPanel.describe_corner(left, auto))
+	var right_back := StitchStep.new(StitchStep.Kind.BACK, 0, 0, PackedInt32Array([2, 3]), 1)
+	_check(StitchPanel.describe_corner(right_back, auto) == "oben links", "auto: return pass to the right comes up top left")
+	var pattern := PatternImporter.from_image(load("res://samples/hypsi_anhaenger.png") as Image, FlossPalette.dmc())
+	var slanted := 0
+	for start_left in [true, false]:
+		for thread in pattern.thread_codes.size():
+			for step in StitchPlanner.plan(pattern, thread, true, start_left):
+				var segments := BackSide.step_segments(step, auto)
+				for i in range(0, segments.size(), 2):
+					slanted += 0 if segments[i].x == segments[i + 1].x else 1
+	_check(slanted == 0, "auto: %d back stitches inside Danish steps are not vertical" % slanted)
+
+	var bottom := StitchStyle.create(StitchStyle.Needle.FROM_BOTTOM, true)
+	_check(StitchPanel.describe_corner(left, bottom) == "unten links", "fixed bottom: always up at the bottom")
+	var segments := BackSide.step_segments(left, bottom)
+	_check(segments == PackedVector2Array([Vector2(4, 0), Vector2(2, 1)]), "fixed bottom: slanted back to the left")
+	var top_backslash := StitchStyle.create(StitchStyle.Needle.FROM_TOP, false)
+	var half := StitchStep.new(StitchStep.Kind.HALF, 0, 0, PackedInt32Array([1]), 1)
+	_check(top_backslash.needle_holes(half) == PackedVector2Array([Vector2(1, 0), Vector2(2, 1)]),
+			"fixed top, \\ first: the half stitch is \\ from the top left")
+	_check(top_backslash.leg_symbol(true) == "\\" and top_backslash.leg_symbol(false) == "/", "leg symbols follow the order")
+	_check(StitchPanel.describe_step(half, top_backslash).ends_with("( \\ )"), StitchPanel.describe_step(half, top_backslash))
+
+
+## English: whole crosses in blocks of at most MAX_BLOCK, every cell once, and the next segment
+## starts near the far end where the needle stopped.
+func _test_english() -> void:
+	var got := _describe(StitchPlanner.plan(_pattern(["0000000", "0000000"]), 0, true, true,
+			StitchPlanner.UNLIMITED, true))
+	_check(got == ["CROSS row 0 [0, 1, 2, 3]", "CROSS row 0 [4, 5, 6]",
+			"CROSS row 1 [6, 5, 4, 3]", "CROSS row 1 [2, 1, 0]"], "english rows: %s" % [got])
+	var pattern := PatternImporter.from_image(load("res://samples/hypsi_anhaenger.png") as Image, FlossPalette.dmc())
+	var session := StitchSession.new(pattern)
+	session.set_english(true)
+	for thread in pattern.thread_codes.size():
+		var count := 0
+		for step in session.steps(thread):
+			_check(step.kind == StitchStep.Kind.CROSS and step.cells.size() <= StitchPlanner.MAX_BLOCK,
+					"english steps are crosses of at most 5")
+			count += step.cells.size()
+		_check(count == pattern.stitch_counts()[thread], "english covers %s once" % pattern.thread_codes[thread])
+	session.advance(0)
+	var states := session.cell_states()
+	session.set_english(false)
+	_check(session.cell_states() == states, "switching method keeps finished crosses")
+	session.set_english(true)
+	_check(session.done_count(0) == 1, "and back again")

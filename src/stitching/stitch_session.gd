@@ -29,6 +29,9 @@ var start_left := true
 ## Most cells the thread may skip on the back (StitchPlanner.UNLIMITED: no automatic changes).
 ## Change it with set_max_skip(), which replans.
 var max_skip := StitchPlanner.UNLIMITED
+## English method: whole crosses one by one instead of Danish passes. Change it with
+## set_english(), which replans. Not saved with the project; it comes from the preferences.
+var english := false
 
 var _plans := {}  # thread index -> Array[StitchStep]
 ## Per thread index, one flag per planned step: 1 when done. Not just "the first n steps", since
@@ -45,7 +48,7 @@ func _init(p_pattern: Pattern) -> void:
 
 func steps(thread: int) -> Array[StitchStep]:
 	if not _plans.has(thread):
-		_plans[thread] = StitchPlanner.plan(pattern, thread, top_to_bottom, start_left, max_skip)
+		_plans[thread] = StitchPlanner.plan(pattern, thread, top_to_bottom, start_left, max_skip, english)
 	return _plans[thread]
 
 
@@ -110,6 +113,16 @@ func set_direction(p_top_to_bottom: bool, p_start_left: bool) -> void:
 	var states := cell_states()
 	top_to_bottom = p_top_to_bottom
 	start_left = p_start_left
+	_replan(states)
+
+
+## Switches between the English and the Danish method and replans, keeping progress like
+## set_max_skip(). Half stitches from Danish passes count as not done for English crosses.
+func set_english(value: bool) -> void:
+	if value == english:
+		return
+	var states := cell_states()
+	english = value
 	_replan(states)
 
 

@@ -29,6 +29,37 @@ static func set_direction(p_top_to_bottom: bool, p_start_left: bool) -> void:
 	_store("start_left", p_start_left)
 
 
+## Whether crosses are stitched one by one (English) instead of the Danish method (default).
+static func english() -> bool:
+	return bool(_load().get_value("stitching", "english", false))
+
+
+static func set_english(value: bool) -> void:
+	_store("english", value)
+
+
+## Advanced: whether the user fixed the leg order and needle direction (see StitchStyle); off by
+## default, then the app picks the cleanest back.
+static func needle_fixed() -> bool:
+	return bool(_load().get_value("stitching", "needle_fixed", false))
+
+
+## With a fixed style: "/" first (default) or "\" first.
+static func slash_first() -> bool:
+	return bool(_load().get_value("stitching", "slash_first", true))
+
+
+## With a fixed style: every leg from the top hole instead of the bottom one (default).
+static func needle_from_top() -> bool:
+	return bool(_load().get_value("stitching", "needle_from_top", false))
+
+
+static func set_stitch_style(fixed: bool, p_slash_first: bool, from_top: bool) -> void:
+	_store("needle_fixed", fixed)
+	_store("slash_first", p_slash_first)
+	_store("needle_from_top", from_top)
+
+
 static func path() -> String:
 	return ProjectStore.directory.path_join("settings.cfg")
 

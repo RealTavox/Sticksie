@@ -20,11 +20,13 @@ item is resolved during normal work, delete its entry in the same change.
 
 - Project code: `src/` (`project/` saving: `StitchProject` and its JSON format, `ProjectStore`
   files in `user://projects/` (list with preview picture, rename, delete) and the last opened project, `Preferences` app-wide settings in
-  `settings.cfg` next to the projects (skip limit, start corner); `palette/` thread colours and Lab matching, `pattern/` the `Pattern`
+  `settings.cfg` next to the projects (skip limit, start corner, stitch method, the advanced
+  stitch style; not saved in the project file, pushed into the open project); `palette/` thread colours and Lab matching, `pattern/` the `Pattern`
   resource, `import/` PNG → pattern, `planner/` Danish stitch order (`StitchPlanner` →
   `StitchStep`s), `stitching/` progress per thread (`StitchSession`), the back of the fabric
-  (`BackSide`: needle holes per step and the thread between them, worked out from the planned
-  steps; drawn mirrored by `PatternView.back_side`) and position hints
+  (`BackSide`: the thread between the needle holes, worked out from the planned steps; drawn
+  mirrored by `PatternView.back_side`), where the needle comes up (`StitchStyle`, see Planner
+  rules) and position hints
   (`PositionHint`: the nearest findable stitch to count from, any colour: the last stitch
   made or the end of a run, never a stitch in the middle of a row of equal stitches), `ui/`
   views (`PatternView` preview and progress mode with the current block's stitch count, `StitchPanel` step guidance, `ProjectBrowser` the
@@ -58,7 +60,9 @@ How to check a change; every fix and feature runs these. Godot binary:
    `$G --path . --resolution 720x1280 -- --projects-dir=<scratch dir> --open=res://samples/hypsi_anhaenger.png --screenshot=<abs path>.png`,
    and again with `1280x720` for landscape; look at the PNGs. Add `--stitch=<DMC code>
    --steps=<n>` for the stitching screen after n confirmed steps, `--max-skip=<n>` to set the
-   skip limit (-1: none), `--start=<top-left|top-right|bottom-left|bottom-right>` the start corner, `--settings` to open the settings dialog, `--projects` the project list, `--back` the back side while stitching. In zsh, pass each user
+   skip limit (-1: none), `--start=<top-left|top-right|bottom-left|bottom-right>` the start corner, `--settings` to open the settings dialog, `--projects` the project list, `--back` the back side while stitching,
+   `--method=<danish|english>`, `--needle=<auto|bottom|top>`, `--first-leg=<slash|backslash>`
+   (both fix the style), `--advanced` with `--settings` for the advanced part. In zsh, pass each user
    argument as its own word (an unsplit `"$args"` arrives as one argument and is ignored).
 
 Touch input (pan, pinch) and the native file dialog are not covered by these; check them on a
@@ -88,6 +92,18 @@ are open segments touching the one just finished, then open segments of the area
 finished one, then other areas. Within a tier the nearest to the needle wins (Chebyshev skip from
 the end the last segment began at to the nearer end of the candidate), ties go to row order. `tests/run_tests.gd` checks on the
 sample that every segment after an area's first touches an earlier one.
+
+English method (`Preferences.english()`, `StitchSession.set_english()` replans like the skip
+limit): every block is a `CROSS` step of whole crosses, in the same blocks, and the needle ends
+at the segment's far end, which the next segment's nearer end is measured from.
+
+Needle holes: `StitchStyle.needle_holes()` is the one place that decides where each leg comes up;
+the guide text (`StitchPanel.describe_corner()`), the needle dot and the back all use it.
+Automatic (default): "/" first, the first leg of a step comes up on the side the step comes
+from, every later leg at the hole nearest to where the needle went down (vertical preferred,
+never the same hole), so Danish passes leave only vertical back stitches in both directions
+(tested on the sample). Fixed (advanced settings): the chosen leg order ("/" or "\" first; cell
+state `HALF` means the first leg) and always up at the bottom or always at the top.
 
 Thread changes: `StitchStep.travel_before` is the cells skipped on the back from the previous
 step's last stitch (Chebyshev distance − 1, so a neighbour, diagonal or next row is 0). With a
