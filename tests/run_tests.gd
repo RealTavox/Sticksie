@@ -180,6 +180,16 @@ func _test_planner_order() -> void:
 	var steps := StitchPlanner.plan(pattern, 0, true, false)
 	_check(steps[0].direction == -1 and steps[1].direction == 1, "directions from the right")
 
+	# A segment starts at its end nearer to the needle, even against the start side: from the
+	# cross at 3, row 1 is worked from the right without a skip instead of 2 cells away.
+	steps = StitchPlanner.plan(_pattern(["...0", "00.0"]), 0, true, true, 2)
+	got = _describe(steps)
+	expected = ["CROSS row 0 [3]", "HALF row 1 [3]", "HALF row 1 [1, 0] skip 1",
+			"BACK row 1 [0, 1]", "BACK row 1 [3] skip 1"]
+	_check(got == expected, "segment from the nearer end: %s" % [got])
+	_check(steps[1].direction == -1 and steps[3].direction == 1 and _starts(steps) == [
+			true, false, false, false, false], "nearer end needs no new thread")
+
 
 ## Every cell of a thread is stitched exactly once as a whole cross, in blocks of at most 5.
 func _test_planner_covers_sample() -> void:

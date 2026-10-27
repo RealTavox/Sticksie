@@ -77,7 +77,10 @@ Weitere Regeln:
   Abschnitte. Ist in den Einstellungen ein kleineres Sprung-Limit gewählt, gilt dieses.
 - **Einzelne Stiche:** Ein Abschnitt aus nur einem Stich wird als einzelnes ganzes Kreuz gestickt
   (erst `/`, dann `\`).
-- Jeder Abschnitt beginnt auf der Startseite, weil der dänische Rückweg dort endet.
+- Jeder Abschnitt beginnt an dem Ende, das der Nadel näher ist (bei gleichem Abstand auf der
+  Startseite); der dänische Rückweg endet wieder dort. Beim Faden zu bleiben ist wichtiger, als
+  jede Reihe in dieselbe Richtung zu sticken. Die Schenkel ändern sich dadurch nicht: Halbstiche
+  sind immer `/`, Gegenstiche immer `\`.
 
 ### Reihenfolge: Fläche für Fläche
 
@@ -90,8 +93,8 @@ Weitere Regeln:
 - Unter diesen (und beim Wechsel zur nächsten Fläche) kommt der Abschnitt, der dem letzten Stich
   am nächsten ist. Bei gleichem Abstand entscheidet die Stickrichtung aus den Einstellungen (Reihe
   für Reihe, von der Startseite aus).
-- Wirkung im Beispielbild: Mit Sprung-Limit 3 braucht es über alle Farben 57 statt 279 Fäden; ohne
-  Limit läuft der Faden auf der Rückseite insgesamt 1 070 statt 10 227 Felder. Felder, die
+- Wirkung im Beispielbild: Mit Sprung-Limit 3 braucht es über alle Farben 53 statt 279 Fäden; ohne
+  Limit läuft der Faden auf der Rückseite insgesamt 1 015 statt 10 227 Felder. Felder, die
   übersprungen und später nachgeholt werden: 1 statt 243 (nur noch beim Wechsel zwischen zwei
   kleinen Flächen).
 

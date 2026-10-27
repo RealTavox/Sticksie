@@ -77,12 +77,12 @@ Fixed in `src/planner/stitch_planner.gd`, decided with the user (DESIGN.md "Offe
 a row segment ends at a gap of more than 3 cells (`MAX_GAP`); a segment of one stitch becomes a
 single full cross; blocks hold at most 5 stitches (`MAX_BLOCK`) and are split evenly
 (7 → 4 + 3); a block never has a gap inside: each run of adjacent cells is split on its own and
-the thread skips on the back only between blocks; every segment starts on the start side, since the Danish return pass ends there. Order: segments
+the thread skips on the back only between blocks; every segment starts at its end nearer to the needle (on a tie the start side; legs stay `/` then `\` either way), and the Danish return pass ends there. Order: segments
 in neighbouring rows that overlap or touch diagonally form an area (`connected_areas()`); an
 area is finished before the next and grows without holes (`_next_segment()`): first candidates
 are open segments touching the one just finished, then open segments of the area touching any
 finished one, then other areas. Within a tier the nearest to the needle wins (Chebyshev skip from
-the start-side end of the last segment), ties go to row order. `tests/run_tests.gd` checks on the
+the end the last segment began at to the nearer end of the candidate), ties go to row order. `tests/run_tests.gd` checks on the
 sample that every segment after an area's first touches an earlier one.
 
 Thread changes: `StitchStep.travel_before` is the cells skipped on the back from the previous
