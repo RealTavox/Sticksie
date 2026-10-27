@@ -25,7 +25,7 @@ item is resolved during normal work, delete its entry in the same change.
   `StitchStep`s), `stitching/` progress per thread (`StitchSession`, not saved yet) and position hints
   (`PositionHint`: the nearest findable stitch to count from, any colour: the last stitch
   made or the end of a run, never a stitch in the middle of a row of equal stitches), `ui/`
-  views (`PatternView` preview and progress mode, `StitchPanel` step guidance, `ProjectBrowser` the
+  views (`PatternView` preview and progress mode with the current block's stitch count, `StitchPanel` step guidance, `ProjectBrowser` the
   project list: open, rename, delete after a confirmation; the preview comes from
   `ProjectStore.preview()`, for now the source image, later meant to show the progress), `main.tscn`/`main.gd` the start screen),
   `tests/run_tests.gd`, plus `project.godot` and the `*.import` files next to resources (they

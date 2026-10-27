@@ -1,7 +1,7 @@
 class_name PatternView
 extends Control
 ## Shows a pattern as a grid. Preview mode draws every cell as a coloured square; progress mode
-## draws only the stitched legs plus the current step. Drag to pan; pinch, trackpad or mouse
+## draws only the stitched legs plus the current step and its stitch count. Drag to pan; pinch, trackpad or mouse
 ## wheel to zoom; a short tap emits `tapped`.
 
 signal tapped
@@ -200,6 +200,8 @@ func _draw() -> void:
 			_draw_thread_end(_thread_end)
 		if _highlight != null and _new_thread:
 			_draw_thread_start(_highlight)
+		if _highlight != null:
+			_draw_block_count(_highlight)
 	draw_rect(grid_rect, GRID_MAJOR_COLOR, false, 2.0)
 
 
@@ -270,6 +272,24 @@ func _draw_highlight(step: StitchStep) -> void:
 	if step.kind == StitchStep.Kind.BACK:
 		start = first.end
 	draw_circle(start, maxf(3.0, _cell_px * 0.15), HIGHLIGHT_COLOR)
+
+
+## How many stitches the current step has, in a badge just past the end the needle moves
+## towards (right of a single cross), so it stays clear of the start dot. Drawn last and at a
+## readable size even when cells are small.
+func _draw_block_count(step: StitchStep) -> void:
+	var rect := _step_rect(step).grow(maxf(2.0, _cell_px * 0.1))
+	var font := get_theme_default_font()
+	var font_size := clampi(int(_cell_px * 0.55), 12, 22)
+	var text := str(step.cells.size())
+	var text_size := font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size)
+	var radius := maxf(text_size.x, font.get_height(font_size)) * 0.5 + 3.0
+	var offset := radius + 4.0
+	var center := Vector2(rect.position.x - offset if step.direction < 0 else rect.end.x + offset,
+			rect.get_center().y)
+	draw_circle(center, radius, HIGHLIGHT_COLOR)
+	draw_string(font, center + Vector2(-text_size.x / 2.0, font.get_ascent(font_size) - font.get_height(font_size) / 2.0),
+			text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, Color.WHITE)
 
 
 ## A ring around the reference stitch, a line along the counting path ending in an arrow, and
