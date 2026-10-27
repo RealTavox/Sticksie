@@ -405,14 +405,20 @@ func _refresh_stitching() -> void:
 	var thread_start := StitchSession.ThreadStart.NONE
 	if step != null:
 		hint = PositionHint.find(pattern, states, step, session.last_cell(thread))
-		thread_start = session.thread_start(thread, session.done_count(thread))
+		thread_start = session.thread_start(thread, session.current_index(thread))
 		position_text = StitchPanel.describe_position(step, hint, pattern, states)
 		var thread_text := StitchPanel.describe_thread(step, thread_start, session.max_skip)
 		if not thread_text.is_empty():
 			position_text = thread_text + "\n" + position_text
-	_view.show_progress(states, step, hint)
+	# Mark the old thread's end when a new one starts here or the colour is finished, and the
+	# new thread's start.
+	var thread_end := Vector2i(-1, -1)
+	if (step == null or thread_start in [StitchSession.ThreadStart.AUTO, StitchSession.ThreadStart.MANUAL]):
+		thread_end = session.last_cell(thread)
+	var new_thread := step != null and thread_start != StitchSession.ThreadStart.NONE
+	_view.show_progress(states, step, hint, thread_end, new_thread)
 	if step != null:
-		_view.ensure_visible(step, hint)
+		_view.ensure_visible(step, hint, thread_end)
 	var floss := _palette.find_code(pattern.thread_codes[thread])
 	_stitch_panel.show_step(floss, step, position_text, session.done_count(thread),
 			session.steps(thread).size(), session.finished_crosses(thread),

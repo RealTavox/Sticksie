@@ -16,6 +16,11 @@ const HIGHLIGHT_COLOR := Color(1.0, 0.5, 0.05)
 const HINT_COLOR := Color(0.1, 0.45, 0.95)
 ## Below this cell size the counting path shows dots instead of numbers.
 const MIN_NUMBER_CELL_PX := 14.0
+## Where the old thread ends (to be secured) and where a new one begins.
+const THREAD_END_COLOR := Color(0.85, 0.15, 0.15)
+const THREAD_START_COLOR := Color(0.1, 0.6, 0.25)
+## Below this cell size the thread markers have no text labels.
+const MIN_LABEL_CELL_PX := 14.0
 ## Opacity and relative thickness of the legs still to stitch in the current step.
 const GHOST_ALPHA := 0.35
 const GHOST_WIDTH := 0.5
@@ -40,6 +45,10 @@ var _colors: Array[Color] = []
 var _states := PackedByteArray()
 var _highlight: StitchStep
 var _hint: PositionHint
+## Last stitch of a thread that has to be secured now, or (-1, -1).
+var _thread_end := Vector2i(-1, -1)
+## Whether the highlighted step begins with a new thread.
+var _new_thread := false
 ## Size of one cell on screen, in pixels.
 var _cell_px := 10.0
 ## Top left corner of the grid, in local coordinates.
@@ -80,11 +89,16 @@ func show_pattern(p: Pattern, palette: FlossPalette, keep_view := false) -> void
 
 
 ## Switches to progress mode: `states` holds a StitchSession.Cell per cell, `highlight` is the
-## step to do next and `hint` where to count it from (either may be null).
-func show_progress(states: PackedByteArray, highlight: StitchStep, hint: PositionHint = null) -> void:
+## step to do next and `hint` where to count it from (either may be null). `thread_end` is the
+## last stitch of a thread to secure now ((-1, -1) if none); `new_thread` marks the highlighted
+## step as the start of a new thread.
+func show_progress(states: PackedByteArray, highlight: StitchStep, hint: PositionHint = null,
+		thread_end := Vector2i(-1, -1), new_thread := false) -> void:
 	_states = states
 	_highlight = highlight
 	_hint = hint
+	_thread_end = thread_end
+	_new_thread = new_thread
 	queue_redraw()
 
 
@@ -92,6 +106,8 @@ func show_preview() -> void:
 	_states = PackedByteArray()
 	_highlight = null
 	_hint = null
+	_thread_end = Vector2i(-1, -1)
+	_new_thread = false
 	queue_redraw()
 
 
@@ -117,14 +133,16 @@ func focus_step(step: StitchStep, min_cell_px: float) -> void:
 	queue_redraw()
 
 
-## Pans so the cells of `step` (and the reference stitch of `hint`) are on screen, if they
-## aren't already.
-func ensure_visible(step: StitchStep, hint: PositionHint = null) -> void:
+## Pans so the cells of `step` (and the reference stitch of `hint`, and `extra` if given) are on
+## screen, if they aren't already.
+func ensure_visible(step: StitchStep, hint: PositionHint = null, extra := Vector2i(-1, -1)) -> void:
 	if not _is_laid_out():
 		return
 	var rect := _step_rect(step)
 	if hint != null:
 		rect = rect.merge(_cell_rect(hint.reference.x, hint.reference.y))
+	if extra.x >= 0:
+		rect = rect.merge(_cell_rect(extra.x, extra.y))
 	var view := Rect2(Vector2.ZERO, size).grow(-FIT_MARGIN)
 	if view.encloses(rect):
 		return
@@ -169,6 +187,10 @@ func _draw() -> void:
 			_draw_highlight(_highlight)
 		if _hint != null:
 			_draw_hint(_hint)
+		if _thread_end.x >= 0:
+			_draw_thread_end(_thread_end)
+		if _highlight != null and _new_thread:
+			_draw_thread_start(_highlight)
 	draw_rect(grid_rect, GRID_MAJOR_COLOR, false, 2.0)
 
 
@@ -275,6 +297,47 @@ func _draw_hint(hint: PositionHint) -> void:
 		var baseline := center + Vector2(-text_size.x / 2.0, -text_size.y / 2.0 + font.get_ascent(font_size))
 		draw_circle(center, _cell_px * 0.3, Color(FABRIC_COLOR, 0.85))
 		draw_string(font, baseline, text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, HINT_COLOR)
+
+
+## The old thread ends here: a red ring with a knot across the last stitch, labelled
+## "vernähen".
+func _draw_thread_end(cell: Vector2i) -> void:
+	var center := _cell_rect(cell.x, cell.y).get_center()
+	var radius := maxf(4.0, _cell_px * 0.55)
+	var width := maxf(2.0, _cell_px * 0.1)
+	draw_arc(center, radius, 0.0, TAU, 32, THREAD_END_COLOR, width)
+	draw_line(center - Vector2(radius, radius) * 0.6, center + Vector2(radius, radius) * 0.6, THREAD_END_COLOR, width)
+	_draw_label(center + Vector2(0.0, -radius - 4.0), "vernähen", THREAD_END_COLOR)
+
+
+## A new thread starts with this step: a green ring around the needle's first hole, labelled
+## "neuer Faden".
+func _draw_thread_start(step: StitchStep) -> void:
+	var first := _leg_rect(step.cells[0], step.row)
+	var start := first.position + Vector2(0.0, first.size.y)
+	if step.kind == StitchStep.Kind.BACK:
+		start = first.end
+	var radius := maxf(5.0, _cell_px * 0.35)
+	draw_arc(start, radius, 0.0, TAU, 32, THREAD_START_COLOR, maxf(2.0, _cell_px * 0.1))
+	_draw_label(start + Vector2(0.0, radius + 4.0 + _label_size() * 0.8), "neuer Faden", THREAD_START_COLOR)
+
+
+## A short label centred at `position` (its baseline), on a light background so it reads over
+## stitches. Left out when cells are too small.
+func _draw_label(position: Vector2, text: String, color: Color) -> void:
+	if _cell_px < MIN_LABEL_CELL_PX:
+		return
+	var font := get_theme_default_font()
+	var font_size := _label_size()
+	var text_size := font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size)
+	var baseline := position - Vector2(text_size.x / 2.0, 0.0)
+	var box := Rect2(baseline + Vector2(-3.0, -font.get_ascent(font_size) - 1.0), text_size + Vector2(6.0, 2.0))
+	draw_rect(box, Color(FABRIC_COLOR, 0.9))
+	draw_string(font, baseline, text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, color)
+
+
+func _label_size() -> int:
+	return clampi(int(_cell_px * 0.5), 10, 18)
 
 
 func _cell_rect(x: int, y: int) -> Rect2:

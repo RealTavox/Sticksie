@@ -30,7 +30,9 @@ var start_left := true
 var max_skip := StitchPlanner.UNLIMITED
 
 var _plans := {}  # thread index -> Array[StitchStep]
-var _done := PackedInt32Array()  # finished steps per thread
+## Per thread index, one flag per planned step: 1 when done. Not just "the first n steps", since
+## after replanning finished stitches can lie anywhere in the new order.
+var _done := {}  # thread index -> PackedByteArray
 ## Manual thread changes per thread index, each as the step's key (see step_key()). Keys instead
 ## of step numbers, so they stay at the same stitch when the plan changes.
 var _manual_starts := {}  # thread index -> Array[Vector3i]
@@ -38,8 +40,6 @@ var _manual_starts := {}  # thread index -> Array[Vector3i]
 
 func _init(p_pattern: Pattern) -> void:
 	pattern = p_pattern
-	_done.resize(pattern.thread_codes.size())
-	_done.fill(0)
 
 
 func steps(thread: int) -> Array[StitchStep]:
@@ -48,41 +48,55 @@ func steps(thread: int) -> Array[StitchStep]:
 	return _plans[thread]
 
 
+## Number of finished steps of `thread`.
 func done_count(thread: int) -> int:
-	return _done[thread]
+	return _flags(thread).count(1)
+
+
+## Index of the next step of `thread`: the first one not done, or the step count when finished.
+func current_index(thread: int) -> int:
+	var index := _flags(thread).find(0)
+	return steps(thread).size() if index < 0 else index
 
 
 ## The next step of `thread`, or null when the thread is finished.
 func current_step(thread: int) -> StitchStep:
-	var all := steps(thread)
-	return all[_done[thread]] if _done[thread] < all.size() else null
+	var index := current_index(thread)
+	return steps(thread)[index] if index < steps(thread).size() else null
 
 
 func advance(thread: int) -> void:
-	_done[thread] = mini(_done[thread] + 1, steps(thread).size())
+	var index := current_index(thread)
+	if index < steps(thread).size():
+		_set_flag(thread, index, 1)
 
 
+## Takes back the last finished step before the current one.
 func go_back(thread: int) -> void:
-	_done[thread] = maxi(_done[thread] - 1, 0)
+	var previous := _previous_done(thread)
+	if previous >= 0:
+		_set_flag(thread, previous, 0)
 
 
-## The cell of the last stitch made in `thread`, or (-1, -1) before the first.
+## The cell of the last stitch made in `thread` (the needle is there), or (-1, -1) before the
+## first.
 func last_cell(thread: int) -> Vector2i:
-	if _done[thread] == 0:
+	var previous := _previous_done(thread)
+	if previous < 0:
 		return Vector2i(-1, -1)
-	var step := steps(thread)[_done[thread] - 1]
+	var step := steps(thread)[previous]
 	return Vector2i(step.cells[-1], step.row)
 
 
 ## Changes the skip limit and replans every thread. Finished stitches stay finished: progress
-## is recounted from the stitched cells.
+## is taken over from the stitched cells.
 func set_max_skip(value: int) -> void:
 	if value == max_skip:
 		return
 	var states := cell_states()
 	max_skip = value
 	_plans.clear()
-	restore(_done, states)
+	restore(states)
 
 
 ## Identifies a step by its first cell and kind: (x, y, kind).
@@ -106,7 +120,7 @@ func thread_start(thread: int, index: int) -> ThreadStart:
 ## new thread starts anyway (first step, skip limit).
 func toggle_manual_start(thread: int) -> void:
 	var step := current_step(thread)
-	if step == null or thread_start(thread, _done[thread]) in [ThreadStart.FIRST, ThreadStart.AUTO]:
+	if step == null or thread_start(thread, current_index(thread)) in [ThreadStart.FIRST, ThreadStart.AUTO]:
 		return
 	var starts: Array = _manual_starts.get_or_add(thread, [])
 	var key := step_key(step)
@@ -143,8 +157,8 @@ func restore_manual_starts(by_code: Dictionary) -> void:
 
 
 func has_progress() -> bool:
-	for count in _done:
-		if count > 0:
+	for thread: int in _done:
+		if _done[thread].has(1):
 			return true
 	return false
 
@@ -153,8 +167,9 @@ func has_progress() -> bool:
 func finished_crosses(thread: int) -> int:
 	var count := 0
 	var all := steps(thread)
-	for i in _done[thread]:
-		if all[i].kind != StitchStep.Kind.HALF:
+	var flags := _flags(thread)
+	for i in all.size():
+		if flags[i] and all[i].kind != StitchStep.Kind.HALF:
 			count += all[i].cells.size()
 	return count
 
@@ -164,50 +179,56 @@ func cell_states() -> PackedByteArray:
 	var states := PackedByteArray()
 	states.resize(pattern.width * pattern.height)
 	states.fill(Cell.NONE)
-	for thread in _done.size():
-		_apply_steps(thread, _done[thread], states)
+	for thread in pattern.thread_codes.size():
+		var all := steps(thread)
+		var flags := _flags(thread)
+		for i in all.size():
+			if not flags[i]:
+				continue
+			var value := Cell.HALF if all[i].kind == StitchStep.Kind.HALF else Cell.FULL
+			for x in all[i].cells:
+				var cell := all[i].row * pattern.width + x
+				states[cell] = maxi(states[cell], value)
 	return states
 
 
-## Restores saved progress: finished steps per thread (indexed like pattern.thread_codes) and
-## the saved cell states. A thread whose steps don't reproduce the saved states (the planner rules
-## changed since saving) is recounted from the states: its steps are done as far as the fabric
-## already shows them.
-func restore(done_steps: PackedInt32Array, saved_states: PackedByteArray) -> void:
-	for thread in _done.size():
-		var count := clampi(done_steps[thread] if thread < done_steps.size() else 0, 0, steps(thread).size())
-		if not _reproduces(thread, count, saved_states):
-			count = _count_from_states(thread, saved_states)
-		_done[thread] = count
+## Restores progress from saved cell states: a step is done when the fabric already shows it
+## (its cells have at least a bottom leg for half stitches, a whole cross otherwise). This works
+## whatever order the plan has now, so changed settings or planner rules keep the progress.
+func restore(saved_states: PackedByteArray) -> void:
+	_done.clear()
+	for thread in pattern.thread_codes.size():
+		var all := steps(thread)
+		var flags := _flags(thread)
+		for i in all.size():
+			var needed := Cell.HALF if all[i].kind == StitchStep.Kind.HALF else Cell.FULL
+			var shown := true
+			for x in all[i].cells:
+				shown = shown and saved_states[all[i].row * pattern.width + x] >= needed
+			flags[i] = 1 if shown else 0
+		_done[thread] = flags
 
 
-func _apply_steps(thread: int, count: int, states: PackedByteArray) -> void:
-	var all := steps(thread)
-	for i in count:
-		var step := all[i]
-		var value := Cell.HALF if step.kind == StitchStep.Kind.HALF else Cell.FULL
-		for x in step.cells:
-			states[step.row * pattern.width + x] = value
+## The done flags of `thread`, created on first use. PackedByteArray is a value type: writing to
+## the returned array doesn't change the stored one, use _set_flag() for that.
+func _flags(thread: int) -> PackedByteArray:
+	if not _done.has(thread):
+		var flags := PackedByteArray()
+		flags.resize(steps(thread).size())
+		flags.fill(0)
+		_done[thread] = flags
+	return _done[thread]
 
 
-## Whether the first `count` steps of `thread` give exactly the saved states of its cells.
-func _reproduces(thread: int, count: int, saved_states: PackedByteArray) -> bool:
-	var states := PackedByteArray()
-	states.resize(saved_states.size())
-	states.fill(Cell.NONE)
-	_apply_steps(thread, count, states)
-	for i in pattern.cells.size():
-		if pattern.cells[i] == thread and states[i] != saved_states[i]:
-			return false
-	return true
+func _set_flag(thread: int, index: int, value: int) -> void:
+	var flags := _flags(thread)
+	flags[index] = value
+	_done[thread] = flags
 
 
-func _count_from_states(thread: int, saved_states: PackedByteArray) -> int:
-	var count := 0
-	for step in steps(thread):
-		var needed := Cell.HALF if step.kind == StitchStep.Kind.HALF else Cell.FULL
-		for x in step.cells:
-			if saved_states[step.row * pattern.width + x] < needed:
-				return count
-		count += 1
-	return count
+func _previous_done(thread: int) -> int:
+	var flags := _flags(thread)
+	for i in range(current_index(thread) - 1, -1, -1):
+		if flags[i]:
+			return i
+	return -1

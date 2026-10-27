@@ -49,8 +49,8 @@ func finished_crosses() -> int:
 
 ## The saved form. The pattern is stored as well as the image, so a later change of the thread
 ## palette or the colour matching can't change a pattern that is already being stitched. Progress
-## is stored as finished steps per thread and as cell states (see StitchSession.restore()), plus
-## the skip limit it was planned with and the manual thread changes.
+## is restored from the cell states (see StitchSession.restore()); `done_steps` (finished steps
+## per thread) is only informational. Also stored: the skip limit and manual thread changes.
 func to_dict() -> Dictionary:
 	var done := {}
 	for thread in pattern.thread_codes.size():
@@ -124,9 +124,5 @@ static func from_dict(data: Dictionary) -> StitchProject:
 	var manual_starts: Variant = progress.get("manual_thread_starts", {})
 	if manual_starts is Dictionary:
 		project.session.restore_manual_starts(manual_starts)
-	var saved_done: Dictionary = progress.get("done_steps", {})
-	var done := PackedInt32Array()
-	for code in pattern.thread_codes:
-		done.append(int(saved_done.get(code, 0)))
-	project.session.restore(done, states)
+	project.session.restore(states)
 	return project

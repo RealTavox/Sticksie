@@ -4,6 +4,11 @@ class_name StitchPlanner
 ## MAX_BLOCK stitches. A block never has a gap inside: the thread skips cells on the back only
 ## between blocks. A segment of a single stitch becomes one full cross.
 ##
+## Order: one connected area of the thread is finished before the next begins. Inside an area the
+## stitched part grows without holes: the next segment must touch a finished one, preferably the
+## one just finished, so no open row is jumped over and filled in later. Among those, and when
+## moving on to the next area, the nearest to the needle wins (on a tie, the first in row order).
+##
 ## Thread changes: with a skip limit (user preference), a step whose way from the previous one
 ## skips more cells on the back starts a new thread. Without a limit only the first step does.
 
@@ -16,9 +21,10 @@ const MAX_GAP := 3
 const UNLIMITED := -1
 
 
-## Steps for `thread` (index into pattern.thread_codes), row by row. Each segment starts on the
-## start side; the Danish return pass brings the needle back there for the next one.
-## `max_skip` is the most cells the thread may skip on the back before a new thread is needed.
+## Steps for `thread` (index into pattern.thread_codes), area by area. Each segment starts on
+## the start side; the Danish return pass brings the needle back there. `top_to_bottom` and
+## `start_left` set the row order used on ties. `max_skip` is the most cells the thread may skip
+## on the back before a new thread is needed.
 static func plan(pattern: Pattern, thread: int, top_to_bottom := true,
 		start_left := true, max_skip := UNLIMITED) -> Array[StitchStep]:
 	var steps: Array[StitchStep] = []
@@ -26,9 +32,27 @@ static func plan(pattern: Pattern, thread: int, top_to_bottom := true,
 	if not top_to_bottom:
 		rows.reverse()
 	var max_gap := MAX_GAP if max_skip == UNLIMITED else mini(MAX_GAP, max_skip)
+	# Segments in row order: the first one found wins a tie.
+	var segment_rows := PackedInt32Array()
+	var segments: Array[PackedInt32Array] = []
 	for y: int in rows:
 		for segment in row_segments(pattern, thread, y, start_left, max_gap):
-			steps.append_array(_segment_steps(segment, thread, y, 1 if start_left else -1))
+			segment_rows.append(y)
+			segments.append(segment)
+	var areas := connected_areas(segment_rows, segments)
+	var done := PackedByteArray()
+	done.resize(segments.size())
+	done.fill(0)
+	var last := -1
+	var needle := Vector2i(-1, -1)
+	for n in segments.size():
+		var next := _next_segment(segment_rows, segments, areas, done, last, needle)
+		done[next] = 1
+		last = next
+		steps.append_array(_segment_steps(segments[next], thread, segment_rows[next],
+				1 if start_left else -1))
+		# The return pass (or the single cross) ends on the segment's start side.
+		needle = Vector2i(segments[next][0], segment_rows[next])
 	for i in steps.size():
 		if i == 0:
 			steps[i].starts_thread = true
@@ -41,7 +65,81 @@ static func plan(pattern: Pattern, thread: int, top_to_bottom := true,
 ## Cells skipped on the back between the last stitch of `from` and the first of `to`. Moving to
 ## a neighbouring cell, also diagonally or to the next row, skips none.
 static func travel(from: StitchStep, to: StitchStep) -> int:
-	var offset := (Vector2i(to.cells[0], to.row) - Vector2i(from.cells[-1], from.row)).abs()
+	return _skipped(Vector2i(from.cells[-1], from.row), Vector2i(to.cells[0], to.row))
+
+
+## The segment to stitch after `last` (-1 at the start). Tried in turn: open segments touching
+## `last`; open segments of the same area touching any finished one; open segments of other areas.
+## In the first tier that has any, the one nearest to the needle wins, on a tie the lowest index
+## (row order).
+static func _next_segment(segment_rows: PackedInt32Array, segments: Array[PackedInt32Array],
+		areas: PackedInt32Array, done: PackedByteArray, last: int, needle: Vector2i) -> int:
+	if last < 0:
+		return 0
+	for tier in 3:
+		var best := -1
+		var best_cost := 0
+		for i in segments.size():
+			if done[i]:
+				continue
+			var fits := false
+			match tier:
+				0:
+					fits = _touch(segment_rows, segments, i, last)
+				1:
+					if areas[i] == areas[last]:
+						for j in segments.size():
+							if done[j] and _touch(segment_rows, segments, i, j):
+								fits = true
+								break
+				_:
+					fits = true
+			if not fits:
+				continue
+			var cost := _skipped(needle, Vector2i(segments[i][0], segment_rows[i]))
+			if best < 0 or cost < best_cost:
+				best = i
+				best_cost = cost
+		if best >= 0:
+			return best
+	return -1
+
+
+## Whether segments `a` and `b` lie in neighbouring rows and overlap or touch diagonally.
+static func _touch(segment_rows: PackedInt32Array, segments: Array[PackedInt32Array], a: int, b: int) -> bool:
+	if absi(segment_rows[a] - segment_rows[b]) != 1:
+		return false
+	var a_min := mini(segments[a][0], segments[a][-1])
+	var a_max := maxi(segments[a][0], segments[a][-1])
+	var b_min := mini(segments[b][0], segments[b][-1])
+	var b_max := maxi(segments[b][0], segments[b][-1])
+	return a_min <= b_max + 1 and b_min <= a_max + 1
+
+
+## Area index per segment: segments in neighbouring rows belong together when they overlap or
+## touch diagonally. Gaps inside a row are already bridged by the segments themselves.
+static func connected_areas(segment_rows: PackedInt32Array,
+		segments: Array[PackedInt32Array]) -> PackedInt32Array:
+	var parent := PackedInt32Array(range(segments.size()))
+	for a in segments.size():
+		for b in range(a + 1, segments.size()):
+			if _touch(segment_rows, segments, a, b):
+				parent[_root(parent, a)] = _root(parent, b)
+	var areas := PackedInt32Array()
+	for i in segments.size():
+		areas.append(_root(parent, i))
+	return areas
+
+
+static func _root(parent: PackedInt32Array, i: int) -> int:
+	while parent[i] != i:
+		i = parent[i]
+	return i
+
+
+## Cells skipped between two cells: none for neighbours, also diagonal ones.
+static func _skipped(from: Vector2i, to: Vector2i) -> int:
+	var offset := (to - from).abs()
 	return maxi(maxi(offset.x, offset.y) - 1, 0)
 
 

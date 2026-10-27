@@ -66,9 +66,9 @@ device or in the editor and say so in the report. Resuming: run once with `--ope
 `StitchProject.to_dict()`, one JSON file per project, `format` 2 (2 added `progress.max_skip`
 and `progress.manual_thread_starts`; format 1 files load with no limit and no manual changes). It holds the image (PNG,
 base64), fabric codes, the pattern itself (so palette or matching changes can't alter a pattern
-being stitched) and progress twice: finished steps per thread code and the cell states. On load,
-a thread whose steps don't reproduce the saved cells (planner rules changed) is recounted from
-the cells (`StitchSession.restore()`). Changing the format needs the user's OK and a new
+being stitched) and progress as cell states; a step counts as done when the cells already show
+it (`StitchSession.restore()`), so any plan order works. `done_steps` per thread code is only
+informational. Changing the format needs the user's OK and a new
 `format` number with a migration for older files.
 
 ### Planner rules
@@ -77,11 +77,22 @@ Fixed in `src/planner/stitch_planner.gd`, decided with the user (DESIGN.md "Offe
 a row segment ends at a gap of more than 3 cells (`MAX_GAP`); a segment of one stitch becomes a
 single full cross; blocks hold at most 5 stitches (`MAX_BLOCK`) and are split evenly
 (7 → 4 + 3); a block never has a gap inside: each run of adjacent cells is split on its own and
-the thread skips on the back only between blocks; every segment starts on the start side, since the Danish return pass ends there.
+the thread skips on the back only between blocks; every segment starts on the start side, since the Danish return pass ends there. Order: segments
+in neighbouring rows that overlap or touch diagonally form an area (`connected_areas()`); an
+area is finished before the next and grows without holes (`_next_segment()`): first candidates
+are open segments touching the one just finished, then open segments of the area touching any
+finished one, then other areas. Within a tier the nearest to the needle wins (Chebyshev skip from
+the start-side end of the last segment), ties go to row order. `tests/run_tests.gd` checks on the
+sample that every segment after an area's first touches an earlier one.
 
 Thread changes: `StitchStep.travel_before` is the cells skipped on the back from the previous
 step's last stitch (Chebyshev distance − 1, so a neighbour, diagonal or next row is 0). With a
 skip limit (`Preferences.max_skip()`, default `StitchPlanner.UNLIMITED`), a step travelling
 further `starts_thread`, and the in-row gap limit drops to min(3, limit). Manual thread changes
 live in `StitchSession` keyed by (first cell, kind), so they survive replanning; changing the
-limit replans via `StitchSession.set_max_skip()`, which recounts progress from the cells.
+limit replans via `StitchSession.set_max_skip()`, which takes progress over from the cells.
+
+Progress: `StitchSession` keeps a done flag per planned step, not a count, because after
+replanning finished stitches can lie anywhere in the new order. The current step is the first
+not done (`current_index()`), "back" clears the last done step before it. The flags live in a
+Dictionary of PackedByteArray (a value type): write them through `_set_flag()`.

@@ -26,6 +26,7 @@ func _initialize() -> void:
 	_test_manual_thread_changes()
 	_test_format_1_loads()
 	_test_describe_thread()
+	_test_areas_grow_without_holes()
 	if _failures == 0:
 		print("All tests passed.")
 	else:
@@ -328,22 +329,18 @@ func _test_session_restore() -> void:
 		original.advance(0)
 	var states := original.cell_states()
 
-	var same := StitchSession.new(pattern)
-	same.restore(PackedInt32Array([5]), states)
-	_check(same.done_count(0) == 5, "matching progress restores as saved")
-
-	# Saved step count doesn't fit the states (e.g. planner rules changed): recount from states.
-	var recounted := StitchSession.new(pattern)
-	recounted.restore(PackedInt32Array([2]), states)
-	_check(recounted.done_count(0) == 5, "mismatch is recounted from states, got %d" % recounted.done_count(0))
-	_check(recounted.cell_states() == states, "recounted progress shows the same stitches")
+	var restored := StitchSession.new(pattern)
+	restored.restore(states)
+	_check(restored.done_count(0) == 5 and restored.current_index(0) == 5,
+			"progress restores from the cells, got %d" % restored.done_count(0))
+	_check(restored.cell_states() == states, "restored progress shows the same stitches")
 
 	var empty := StitchSession.new(pattern)
 	var none := PackedByteArray()
 	none.resize(states.size())
 	none.fill(StitchSession.Cell.NONE)
-	empty.restore(PackedInt32Array([3]), none)
-	_check(empty.done_count(0) == 0, "no stitched cells means no progress")
+	empty.restore(none)
+	_check(empty.done_count(0) == 0 and not empty.has_progress(), "no stitched cells means no progress")
 
 
 func _sample_project() -> StitchProject:
@@ -452,37 +449,49 @@ func _starts(steps: Array[StitchStep]) -> Array[bool]:
 
 func _test_thread_changes() -> void:
 	var pattern := _pattern(["00...00....0", "000........."])
+	# Row 1 touches the first segment of row 0, so it comes before the lone cross at 11.
 	var unlimited := StitchPlanner.plan(pattern, 0)
 	_check(_starts(unlimited) == [true, false, false, false, false, false, false],
 			"without a limit only the first step starts a thread: %s" % [_starts(unlimited)])
-	_check(unlimited[4].travel_before == 10 and unlimited[5].travel_before == 10,
-			"long ways are measured: %s" % [_describe(unlimited)])
+	_check(unlimited[6].travel_before == 10 and str(unlimited[4]) == "HALF row 1 [0, 1, 2]",
+			"area first, then the long way: %s" % [_describe(unlimited)])
 
 	# Limit 2: the gap of 3 now splits the row, and every way longer than 2 needs a new thread.
 	var limited := StitchPlanner.plan(pattern, 0, true, true, 2)
 	var got := _describe(limited)
-	var expected := ["HALF row 0 [0, 1]", "BACK row 0 [1, 0]", "HALF row 0 [5, 6] skip 4",
-			"BACK row 0 [6, 5]", "CROSS row 0 [11] skip 5", "HALF row 1 [0, 1, 2] skip 10",
-			"BACK row 1 [2, 1, 0]"]
+	var expected := ["HALF row 0 [0, 1]", "BACK row 0 [1, 0]", "HALF row 1 [0, 1, 2]",
+			"BACK row 1 [2, 1, 0]", "HALF row 0 [5, 6] skip 4", "BACK row 0 [6, 5]",
+			"CROSS row 0 [11] skip 5"]
 	_check(got == expected, "limit 2 splits at gap 3: %s" % [got])
-	_check(_starts(limited) == [true, false, true, false, true, true, false],
+	_check(_starts(limited) == [true, false, false, false, true, false, true],
 			"limit 2 thread starts: %s" % [_starts(limited)])
 
 	# The next row directly below is no skip.
 	var rows := StitchPlanner.plan(_pattern(["00", "00"]), 0, true, true, 0)
 	_check(_starts(rows) == [true, false, false, false], "next row needs no new thread even at limit 0")
 
-	# Changing the limit keeps what is stitched.
+	# Changing the limit keeps what is stitched, even where it lies out of the new order: row 0
+	# (steps 0, 1 and 4, 5 in the new plan) is done, row 1 (steps 2, 3) is not.
 	var session := StitchSession.new(pattern)
-	for i in 4:
-		session.advance(0)
+	session.set_max_skip(StitchPlanner.UNLIMITED)
+	for step in session.steps(0):
+		if step.row == 0 and step.kind != StitchStep.Kind.CROSS:
+			session.advance(0)
 	var before := session.cell_states()
 	session.set_max_skip(2)
 	_check(session.cell_states() == before, "stitched cells stay after changing the limit")
-	_check(session.done_count(0) == 4, "progress recounted after changing the limit: %d" % session.done_count(0))
-	_check(session.thread_start(0, 4) == StitchSession.ThreadStart.AUTO, "next step starts a new thread")
+	_check(session.done_count(0) == 4 and session.current_index(0) == 2,
+			"progress taken over: %d done, next %d" % [session.done_count(0), session.current_index(0)])
+	_check(session.last_cell(0) == Vector2i(0, 0), "needle at the end of the last done step before")
+	_check(session.thread_start(0, 4) == StitchSession.ThreadStart.AUTO, "step 4 starts a new thread")
 	_check(session.thread_start(0, 0) == StitchSession.ThreadStart.FIRST, "first step is FIRST")
 	_check(session.thread_start(0, 3) == StitchSession.ThreadStart.NONE, "return pass is no start")
+	session.go_back(0)
+	_check(session.current_index(0) == 1 and session.done_count(0) == 3, "back takes the step before the current one")
+	session.advance(0)
+	session.advance(0)
+	session.advance(0)
+	_check(session.current_index(0) == 6, "done steps further on are skipped: next %d" % session.current_index(0))
 
 
 func _test_manual_thread_changes() -> void:
@@ -535,3 +544,37 @@ func _test_describe_thread() -> void:
 	step.travel_before = 0
 	_check(StitchPanel.describe_thread(step, StitchSession.ThreadStart.NONE, 3).is_empty(),
 			"nothing to say for a neighbouring step")
+
+
+## Inside an area every segment touches one stitched before it, so no open row is jumped over and
+## filled in later (the case in the user's screenshots). Checked on every colour of the sample.
+func _test_areas_grow_without_holes() -> void:
+	var pattern := PatternImporter.from_image(load("res://samples/hypsi_anhaenger.png") as Image, FlossPalette.dmc())
+	for thread in pattern.thread_codes.size():
+		# Rebuild the segments in stitching order: a new one begins with every HALF or CROSS step
+		# that follows a finished segment (a BACK or CROSS step) or changes row.
+		var rows := PackedInt32Array()
+		var segments: Array[PackedInt32Array] = []
+		var previous: StitchStep = null
+		for step in StitchPlanner.plan(pattern, thread):
+			var opens := previous == null or previous.row != step.row or previous.kind != StitchStep.Kind.HALF
+			if step.kind != StitchStep.Kind.BACK and opens:
+				rows.append(step.row)
+				segments.append(PackedInt32Array())
+			if step.kind != StitchStep.Kind.BACK:
+				segments[-1].append_array(step.cells)
+			previous = step
+		for segment in segments:
+			segment.sort()
+		var areas := StitchPlanner.connected_areas(rows, segments)
+		var seen := {}
+		var holes := 0
+		for i in segments.size():
+			if seen.has(areas[i]):
+				var touches := false
+				for j in i:
+					touches = touches or StitchPlanner._touch(rows, segments, i, j)
+				holes += 0 if touches else 1
+			seen[areas[i]] = true
+		_check(holes == 0, "%s: %d segments start away from the stitched part of their area" % [
+				pattern.thread_codes[thread], holes])

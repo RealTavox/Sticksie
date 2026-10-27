@@ -43,6 +43,9 @@ Fadenoptik, flüssige Animationen, klare Führung.
   Noch nicht gestickte Felder sind nicht sichtbar (kein Vorlagen-Overlay).
 - Der aktuelle Schritt: Rahmen um den Block, die noch zu stickenden Schenkel blass, ein Punkt dort,
   wo die Nadel zuerst hochkommt. Beim Start einer Farbe zoomt die Ansicht auf den ersten Block.
+- Fadenwechsel im Bild: **rot „vernähen“** am letzten Stich des alten Fadens (bei jedem
+  Fadenwechsel und wenn eine Farbe fertig ist), **grün „neuer Faden“** am ersten Loch des neuen
+  Fadens (auch beim ersten Schritt einer Farbe).
 
 ### Stichmethode: dänisch
 
@@ -75,6 +78,22 @@ Weitere Regeln:
 - **Einzelne Stiche:** Ein Abschnitt aus nur einem Stich wird als einzelnes ganzes Kreuz gestickt
   (erst `/`, dann `\`).
 - Jeder Abschnitt beginnt auf der Startseite, weil der dänische Rückweg dort endet.
+
+### Reihenfolge: Fläche für Fläche
+
+- Eine Farbe besteht oft aus mehreren getrennten **Flächen**. Abschnitte in benachbarten Reihen
+  gehören zur selben Fläche, wenn sie sich überlappen oder schräg berühren.
+- Eine Fläche wird **fertig gestickt, bevor die nächste beginnt**.
+- **Die Fläche wächst ohne Löcher:** Als Nächstes kommt nur ein Abschnitt in Frage, der an schon
+  Gesticktes angrenzt, zuerst einer, der an den gerade fertigen Abschnitt grenzt. Es wird also nie
+  eine offene Reihe übersprungen, um später zu ihr zurückzukommen.
+- Unter diesen (und beim Wechsel zur nächsten Fläche) kommt der Abschnitt, der dem letzten Stich
+  am nächsten ist. Bei gleichem Abstand entscheidet die Stickrichtung aus den Einstellungen (Reihe
+  für Reihe, von der Startseite aus).
+- Wirkung im Beispielbild: Mit Sprung-Limit 3 braucht es über alle Farben 57 statt 279 Fäden; ohne
+  Limit läuft der Faden auf der Rückseite insgesamt 1 070 statt 10 227 Felder. Felder, die
+  übersprungen und später nachgeholt werden: 1 statt 243 (nur noch beim Wechsel zwischen zwei
+  kleinen Flächen).
 
 ### Smarte Positionshinweise
 
@@ -122,7 +141,9 @@ Umsetzung:
 - Jedes geöffnete Bild wird ein eigenes Projekt (Name aus dem Dateinamen). Das Bild wird mit
   gespeichert, das Original darf also verschoben oder gelöscht werden.
 - Der Fortschritt ist so gespeichert, dass er auch nach Regeländerungen (andere Einstellungen,
-  neue App-Version) an denselben Stichen bleibt.
+  neue App-Version) an denselben Stichen bleibt: Gespeichert ist, welche Felder gestickt sind.
+  Ändert sich die Reihenfolge, gilt jeder Schritt als erledigt, den der Stoff schon zeigt; weiter
+  geht es mit dem ersten offenen.
 
 ## 3. Optik und Ansichten
 
@@ -143,7 +164,8 @@ eine 180°-Drehung des Stoffs; Vorder- und Rückseite entstehen aus demselben Fa
 - **Sprung-Limit** für automatische Fadenwechsel (siehe „Faden neu“): aus (Standard) oder eine
   Anzahl Felder. Üblich sind 2–3. *(umgesetzt)*
 - **Stickrichtung** nach Vorliebe: Reihenfolge der Reihen (oben → unten oder unten → oben) und
-  Startseite (links oder rechts).
+  Startseite (links oder rechts). Bei der Reihenfolge Fläche für Fläche entscheidet sie, wo es
+  losgeht und welcher Abschnitt bei gleichem Abstand zuerst kommt.
 - Richtung des oberen Schenkels.
 
 ## 5. Plattformen
@@ -161,17 +183,14 @@ eine 180°-Drehung des Stoffs; Vorder- und Rückseite entstehen aus demselben Fa
 
 ## Offene Punkte
 
-- **Reihenfolge nach Bereichen:** Der Planer geht Reihe für Reihe über das ganze Bild. Bei
-  getrennten Flächen derselben Farbe springt der Faden dadurch oft weit; mit Sprung-Limit 3 braucht
-  das Beispielbild in einer Farbe 58 Fäden. Besser wäre, eine zusammenhängende Fläche fertig zu
-  sticken, bevor die nächste kommt.
 - **Wege unter fertigen Stichen:** Auf der Rückseite darf der Faden auch weiter laufen, wenn er
   unter schon gestickten Stichen durchgezogen wird. Das Sprung-Limit zählt bisher nur Felder.
 - Stoffart und Garnstärke (z. B. Aida 14 ct, 2 Fäden) für die Fadenlängen-Schätzung.
 - Projekte löschen und umbenennen; „Beispiel“ legt bisher jedes Mal ein neues Projekt an.
 - Im Querformat ist die Schrift sehr klein (Fenstereinstellungen sind auf Hochformat ausgelegt).
 
-Geklärt (siehe oben): Lücken in einer Reihe, einzelne verstreute Stiche, Fortschritt speichern.
+Geklärt (siehe oben): Lücken in einer Reihe, einzelne verstreute Stiche, Fortschritt speichern,
+Reihenfolge nach Flächen.
 
 ## Reihenfolge der Umsetzung
 
