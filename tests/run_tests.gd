@@ -15,6 +15,9 @@ func _initialize() -> void:
 	_test_planner_rows()
 	_test_planner_order()
 	_test_planner_covers_sample()
+	_test_session()
+	_test_position_hint()
+	_test_describe_offset()
 	if _failures == 0:
 		print("All tests passed.")
 	else:
@@ -142,10 +145,17 @@ func _test_planner_rows() -> void:
 			"BACK row 0 [9, 8, 7, 6, 5]", "BACK row 0 [4, 3, 2, 1, 0]"]
 	_check(got == expected, "10 in a row: %s" % [got])
 
-	# A gap of 3 is skipped on the back, a gap of 4 splits the row.
+	# A gap of 3 is skipped on the back between blocks, a gap of 4 splits the row.
 	got = _describe(StitchPlanner.plan(_pattern(["00...00....0"]), 0))
-	expected = ["HALF row 0 [0, 1, 5, 6]", "BACK row 0 [6, 5, 1, 0]", "CROSS row 0 [11]"]
+	expected = ["HALF row 0 [0, 1]", "HALF row 0 [5, 6] skip 3", "BACK row 0 [6, 5]",
+			"BACK row 0 [1, 0] skip 3", "CROSS row 0 [11]"]
 	_check(got == expected, "gaps: %s" % [got])
+
+	# Blocks never span a gap; each run of adjacent cells is split on its own.
+	got = _describe(StitchPlanner.plan(_pattern(["0000000..00"]), 0))
+	expected = ["HALF row 0 [0, 1, 2, 3]", "HALF row 0 [4, 5, 6]", "HALF row 0 [9, 10] skip 2",
+			"BACK row 0 [10, 9]", "BACK row 0 [6, 5, 4, 3] skip 2", "BACK row 0 [2, 1, 0]"]
+	_check(got == expected, "runs split separately: %s" % [got])
 
 	# Other threads are left alone.
 	got = _describe(StitchPlanner.plan(_pattern(["0110"]), 1))
@@ -172,6 +182,8 @@ func _test_planner_covers_sample() -> void:
 		var ok := true
 		for step in StitchPlanner.plan(pattern, thread):
 			ok = ok and step.cells.size() <= StitchPlanner.MAX_BLOCK and step.thread == thread
+			for i in range(1, step.cells.size()):
+				ok = ok and absi(step.cells[i] - step.cells[i - 1]) == 1
 			for x in step.cells:
 				var key := Vector2i(x, step.row)
 				ok = ok and pattern.get_cell(x, step.row) == thread
@@ -183,5 +195,119 @@ func _test_planner_covers_sample() -> void:
 					backs[key] = true
 		var count := pattern.stitch_counts()[thread]
 		_check(ok and halves.size() == count and backs.size() == count,
-				"thread %s: every cell crossed once (%d cells, %d bottom legs, %d top legs)" % [
+				"thread %s: every cell crossed once, no gap inside a block (%d cells, %d bottom legs, %d top legs)" % [
 					pattern.thread_codes[thread], count, halves.size(), backs.size()])
+
+
+func _test_session() -> void:
+	var pattern := _pattern(["000000.1", "......11"])
+	var session := StitchSession.new(pattern)
+	var width := pattern.width
+	_check(not session.has_progress(), "new session has no progress")
+	_check(str(session.current_step(0)) == "HALF row 0 [0, 1, 2]", "first step of thread 0")
+	session.go_back(0)
+	_check(session.done_count(0) == 0, "going back at the start stays at 0")
+
+	session.advance(0)
+	var states := session.cell_states()
+	_check(states[0] == StitchSession.Cell.HALF and states[3] == StitchSession.Cell.NONE,
+			"after one step the first block has bottom legs only")
+	_check(session.finished_crosses(0) == 0, "half stitches are no finished crosses")
+	session.advance(0)
+	session.advance(0)
+	states = session.cell_states()
+	_check(states[5] == StitchSession.Cell.FULL and states[2] == StitchSession.Cell.HALF,
+			"first return block completes cells 5..3")
+	_check(session.finished_crosses(0) == 3, "3 crosses finished, got %d" % session.finished_crosses(0))
+	session.advance(0)
+	_check(session.current_step(0) == null, "thread 0 is finished after 4 steps")
+	session.advance(0)
+	_check(session.done_count(0) == 4, "advancing past the end stays at the end")
+	_check(session.finished_crosses(0) == 6, "all 6 crosses of thread 0 finished")
+
+	states = session.cell_states()
+	_check(states[7] == StitchSession.Cell.NONE and states[width + 6] == StitchSession.Cell.NONE,
+			"thread 1 is untouched")
+	session.advance(1)
+	states = session.cell_states()
+	_check(states[7] == StitchSession.Cell.FULL, "single stitch of thread 1 is a full cross")
+	_check(session.has_progress(), "session has progress")
+
+
+func _test_position_hint() -> void:
+	# Row 0: thread 0 with a gap of 1; row 2: thread 1 under it; thread 0 again in row 3.
+	var pattern := _pattern(["000.0", ".....", "..1..", "0...."])
+	var session := StitchSession.new(pattern)
+	var first := session.current_step(0)
+	_check(PositionHint.find(pattern, session.cell_states(), first) == null,
+			"no hint for the very first stitch")
+
+	session.advance(0)
+	var after_gap := session.current_step(0)
+	var hint := PositionHint.find(pattern, session.cell_states(), after_gap)
+	_check(hint != null and hint.reference == Vector2i(2, 0) and hint.target == Vector2i(4, 0),
+			"after a gap, count from the end of the last block")
+	_check(hint != null and hint.path == [Vector2i(3, 0), Vector2i(4, 0)], "path counts 2 cells")
+
+	session.advance(0)
+	_check(PositionHint.find(pattern, session.cell_states(), session.current_step(0)) == null,
+			"no hint for a return pass")
+	while session.current_step(0) != null and session.current_step(0).row == 0:
+		session.advance(0)
+
+	# Row 3 (0, 3): nearest stitch is (0, 0) at 3 straight down, not (2, 0) with a bend.
+	var down := session.current_step(0)
+	hint = PositionHint.find(pattern, session.cell_states(), down)
+	_check(hint != null and hint.reference == Vector2i(0, 0), "straight line wins: %s" % [
+			hint.reference if hint else null])
+	_check(hint != null and hint.path == [Vector2i(0, 1), Vector2i(0, 2), Vector2i(0, 3)],
+			"path goes straight down")
+
+	# Thread 1 at (2, 2): two below (2, 0), any colour counts as reference.
+	hint = PositionHint.find(pattern, session.cell_states(), session.current_step(1))
+	_check(hint != null and hint.reference == Vector2i(2, 0), "other thread as reference")
+	_check(hint != null and hint.corner() == hint.target, "a straight path has its corner at the target")
+
+	# The stitch just made is a reference even inside a run; the cross above it is not.
+	var tie := _pattern(["1111111111", "0000000000"])
+	var tie_session := StitchSession.new(tie)
+	while tie_session.current_step(1) != null:
+		tie_session.advance(1)
+	tie_session.advance(0)
+	hint = PositionHint.find(tie, tie_session.cell_states(), tie_session.current_step(0),
+			tie_session.last_cell(0))
+	_check(hint != null and hint.reference == Vector2i(4, 1)
+			and hint.landmark == PositionHint.Landmark.LAST, "last stitch is the reference: %s" % [
+			hint.reference if hint else null])
+
+	# A stitch in the middle of a run is never the reference, even when it is closest.
+	var run := _pattern(["1111111111", "....0000.."])
+	var run_session := StitchSession.new(run)
+	while run_session.current_step(1) != null:
+		run_session.advance(1)
+	hint = PositionHint.find(run, run_session.cell_states(), run_session.current_step(0))
+	_check(hint != null and hint.reference == Vector2i(0, 0)
+			and hint.landmark == PositionHint.Landmark.LEFT_END,
+			"count from the end of the row above: %s" % [hint.reference if hint else null])
+
+	# Bent path: longer leg first.
+	var bent := PositionHint.new()
+	bent.reference = Vector2i(0, 0)
+	bent.target = Vector2i(3, 1)
+	_check(bent.corner() == Vector2i(3, 0), "corner after the longer horizontal leg")
+	_check(PositionHint._counting_path(bent.reference, bent.target)
+			== [Vector2i(1, 0), Vector2i(2, 0), Vector2i(3, 0), Vector2i(3, 1)], "bent path")
+
+
+func _test_describe_offset() -> void:
+	var ref := "dem markierten Kreuz (DMC 310) am linken Ende"
+	var cases := {
+		Vector2i(1, 0): "Direkt rechts neben dem markierten Kreuz (DMC 310) am linken Ende.",
+		Vector2i(0, 1): "Direkt unter dem markierten Kreuz (DMC 310) am linken Ende.",
+		Vector2i(-1, -1): "Schräg links über dem markierten Kreuz (DMC 310) am linken Ende.",
+		Vector2i(3, 0): "Ab dem markierten Kreuz (DMC 310) am linken Ende zählen: 3 nach rechts.",
+		Vector2i(-1, 4): "Ab dem markierten Kreuz (DMC 310) am linken Ende zählen: 4 nach unten, dann 1 nach links.",
+	}
+	for offset: Vector2i in cases:
+		var got := StitchPanel.describe_offset(offset, ref)
+		_check(got == cases[offset], "describe %s: %s" % [offset, got])

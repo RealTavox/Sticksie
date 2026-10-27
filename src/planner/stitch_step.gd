@@ -20,6 +20,8 @@ var row: int
 var cells: PackedInt32Array
 ## +1 to the right, -1 to the left (0 for a single cross).
 var direction: int
+## Cells the thread skips on the back between the previous block of this pass and this one.
+var skip_before := 0
 
 
 func _init(p_kind: Kind, p_thread: int, p_row: int, p_cells: PackedInt32Array, p_direction: int) -> void:
@@ -31,4 +33,5 @@ func _init(p_kind: Kind, p_thread: int, p_row: int, p_cells: PackedInt32Array, p
 
 
 func _to_string() -> String:
-	return "%s row %d %s" % [Kind.keys()[kind], row, cells]
+	var text := "%s row %d %s" % [Kind.keys()[kind], row, cells]
+	return text + (" skip %d" % skip_before if skip_before > 0 else "")

@@ -20,7 +20,10 @@ item is resolved during normal work, delete its entry in the same change.
 
 - Project code: `src/` (`palette/` thread colours and Lab matching, `pattern/` the `Pattern`
   resource, `import/` PNG → pattern, `planner/` Danish stitch order (`StitchPlanner` →
-  `StitchStep`s), `ui/` views, `main.tscn`/`main.gd` the start screen),
+  `StitchStep`s), `stitching/` progress per thread (`StitchSession`, not saved yet) and position hints
+  (`PositionHint`: the nearest findable stitch to count from, any colour: the last stitch
+  made or the end of a run, never a stitch in the middle of a row of equal stitches), `ui/`
+  views (`PatternView` preview and progress mode, `StitchPanel` step guidance), `main.tscn`/`main.gd` the start screen),
   `tests/run_tests.gd`, plus `project.godot` and the `*.import` files next to resources (they
   hold import settings: `data/threads/dmc-floss.csv` uses the "keep" importer so it isn't
   turned into a translation, `samples/*.png` use the "image" importer so `load()` returns an
@@ -41,12 +44,14 @@ How to check a change; every fix and feature runs these. Godot binary:
 2. `$G --headless --path . --script res://tests/run_tests.gd`: prints "All tests passed."
    and exits 0. Plain checks without a framework (Lab/CIEDE2000 against Sharma's reference
    pairs, DMC palette, importing the sample, stitch planner incl. that every cell of the sample
-   is crossed exactly once).
-3. `$G --headless --path . --quit-after 120 -- --open=res://samples/hypsi_anhaenger.png 2>&1 | grep -E "ERROR|WARNING"`:
+   is crossed exactly once, stitching progress, position hints and their wording).
+3. `$G --headless --path . --quit-after 120 -- --open=res://samples/hypsi_anhaenger.png --stitch=3837 --steps=7 2>&1 | grep -E "ERROR|WARNING"`:
    no output.
 4. Screenshot (opens a window for a moment):
    `$G --path . --resolution 720x1280 -- --open=res://samples/hypsi_anhaenger.png --screenshot=<abs path>.png`,
-   and again with `1280x720` for landscape; look at the PNGs.
+   and again with `1280x720` for landscape; look at the PNGs. Add `--stitch=<DMC code>
+   --steps=<n>` for the stitching screen after n confirmed steps. In zsh, pass each user
+   argument as its own word (an unsplit `"$args"` arrives as one argument and is ignored).
 
 Touch input (pan, pinch) and the native file dialog are not covered by these; check them on a
 device or in the editor and say so in the report.
@@ -56,4 +61,5 @@ device or in the editor and say so in the report.
 Fixed in `src/planner/stitch_planner.gd`, decided with the user (DESIGN.md "Offene Punkte"):
 a row segment ends at a gap of more than 3 cells (`MAX_GAP`); a segment of one stitch becomes a
 single full cross; blocks hold at most 5 stitches (`MAX_BLOCK`) and are split evenly
-(7 → 4 + 3); every segment starts on the start side, since the Danish return pass ends there.
+(7 → 4 + 3); a block never has a gap inside: each run of adjacent cells is split on its own and
+the thread skips on the back only between blocks (`StitchStep.skip_before`); every segment starts on the start side, since the Danish return pass ends there.
