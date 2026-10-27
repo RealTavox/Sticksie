@@ -11,6 +11,10 @@ func _initialize() -> void:
 	_test_palette()
 	_test_import_sample()
 	_test_import_transparent()
+	_test_split_blocks()
+	_test_planner_rows()
+	_test_planner_order()
+	_test_planner_covers_sample()
 	if _failures == 0:
 		print("All tests passed.")
 	else:
@@ -93,3 +97,91 @@ func _test_import_transparent() -> void:
 	var pattern := PatternImporter.from_image(image, FlossPalette.dmc())
 	_check(pattern.get_cell(0, 0) == Pattern.EMPTY, "transparent pixel stays empty")
 	_check(pattern.get_cell(1, 0) == 0, "opaque pixel gets a thread")
+
+
+## Pattern from text rows: a digit is that thread index, "." is fabric.
+func _pattern(rows: Array[String]) -> Pattern:
+	var pattern := Pattern.new()
+	pattern.width = rows[0].length()
+	pattern.height = rows.size()
+	var highest := -1
+	for row in rows:
+		for ch in row:
+			var index := Pattern.EMPTY if ch == "." else ch.to_int()
+			pattern.cells.append(index)
+			highest = maxi(highest, index)
+	for i in highest + 1:
+		pattern.thread_codes.append(str(i))
+	return pattern
+
+
+func _describe(steps: Array[StitchStep]) -> Array[String]:
+	var result: Array[String] = []
+	for step in steps:
+		result.append(str(step))
+	return result
+
+
+func _test_split_blocks() -> void:
+	var cases := {10: [5, 5], 7: [4, 3], 6: [3, 3], 11: [4, 4, 3], 5: [5], 2: [2], 1: [1]}
+	for n: int in cases:
+		var cells := PackedInt32Array(range(n))
+		var sizes := []
+		var joined := PackedInt32Array()
+		for block in StitchPlanner.split_blocks(cells):
+			sizes.append(block.size())
+			joined.append_array(block)
+		_check(sizes == cases[n], "split %d into %s, got %s" % [n, cases[n], sizes])
+		_check(joined == cells, "split %d keeps order" % n)
+
+
+func _test_planner_rows() -> void:
+	# DESIGN.md example: 10 cells → 5 right, 5 right, 5 back, 5 back.
+	var got := _describe(StitchPlanner.plan(_pattern(["0000000000"]), 0))
+	var expected := ["HALF row 0 [0, 1, 2, 3, 4]", "HALF row 0 [5, 6, 7, 8, 9]",
+			"BACK row 0 [9, 8, 7, 6, 5]", "BACK row 0 [4, 3, 2, 1, 0]"]
+	_check(got == expected, "10 in a row: %s" % [got])
+
+	# A gap of 3 is skipped on the back, a gap of 4 splits the row.
+	got = _describe(StitchPlanner.plan(_pattern(["00...00....0"]), 0))
+	expected = ["HALF row 0 [0, 1, 5, 6]", "BACK row 0 [6, 5, 1, 0]", "CROSS row 0 [11]"]
+	_check(got == expected, "gaps: %s" % [got])
+
+	# Other threads are left alone.
+	got = _describe(StitchPlanner.plan(_pattern(["0110"]), 1))
+	_check(got == ["HALF row 0 [1, 2]", "BACK row 0 [2, 1]"], "other thread: %s" % [got])
+
+
+func _test_planner_order() -> void:
+	var pattern := _pattern(["00.", "000"])
+	var got := _describe(StitchPlanner.plan(pattern, 0, false, false))
+	var expected := ["HALF row 1 [2, 1, 0]", "BACK row 1 [0, 1, 2]",
+			"HALF row 0 [1, 0]", "BACK row 0 [0, 1]"]
+	_check(got == expected, "bottom up, from the right: %s" % [got])
+	var steps := StitchPlanner.plan(pattern, 0, true, false)
+	_check(steps[0].direction == -1 and steps[1].direction == 1, "directions from the right")
+
+
+## Every cell of a thread is stitched exactly once as a whole cross, in blocks of at most 5.
+func _test_planner_covers_sample() -> void:
+	var image := load("res://samples/hypsi_anhaenger.png") as Image
+	var pattern := PatternImporter.from_image(image, FlossPalette.dmc())
+	for thread in pattern.thread_codes.size():
+		var halves := {}
+		var backs := {}
+		var ok := true
+		for step in StitchPlanner.plan(pattern, thread):
+			ok = ok and step.cells.size() <= StitchPlanner.MAX_BLOCK and step.thread == thread
+			for x in step.cells:
+				var key := Vector2i(x, step.row)
+				ok = ok and pattern.get_cell(x, step.row) == thread
+				if step.kind != StitchStep.Kind.BACK:
+					ok = ok and not halves.has(key)
+					halves[key] = true
+				if step.kind != StitchStep.Kind.HALF:
+					ok = ok and not backs.has(key)
+					backs[key] = true
+		var count := pattern.stitch_counts()[thread]
+		_check(ok and halves.size() == count and backs.size() == count,
+				"thread %s: every cell crossed once (%d cells, %d bottom legs, %d top legs)" % [
+					pattern.thread_codes[thread], count, halves.size(), backs.size()])
