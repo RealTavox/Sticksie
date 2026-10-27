@@ -39,13 +39,22 @@ static func set_english(value: bool) -> void:
 
 
 ## Whether the Danish return pass goes over every run of adjacent cells in one step (default)
-## instead of blocks of at most 5.
+## instead of blocks of at most max_block().
 static func whole_back() -> bool:
 	return bool(_load().get_value("stitching", "whole_back", true))
 
 
 static func set_whole_back(value: bool) -> void:
 	_store("whole_back", value)
+
+
+## Most stitches in one block (default StitchPlanner.DEFAULT_MAX_BLOCK).
+static func max_block() -> int:
+	return maxi(int(_load().get_value("stitching", "max_block", StitchPlanner.DEFAULT_MAX_BLOCK)), 1)
+
+
+static func set_max_block(value: int) -> void:
+	_store("max_block", value)
 
 
 ## Advanced: whether the user fixed the leg order and needle direction (see StitchStyle); off by

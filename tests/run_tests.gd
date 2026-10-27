@@ -32,6 +32,7 @@ func _initialize() -> void:
 	_test_stitch_style()
 	_test_english()
 	_test_whole_back_pass()
+	_test_max_block()
 	if _failures == 0:
 		print("All tests passed.")
 	else:
@@ -240,7 +241,7 @@ func _test_planner_covers_sample() -> void:
 		var backs := {}
 		var ok := true
 		for step in StitchPlanner.plan(pattern, thread):
-			ok = ok and step.cells.size() <= StitchPlanner.MAX_BLOCK and step.thread == thread
+			ok = ok and step.cells.size() <= StitchPlanner.DEFAULT_MAX_BLOCK and step.thread == thread
 			for i in range(1, step.cells.size()):
 				ok = ok and absi(step.cells[i] - step.cells[i - 1]) == 1
 			for x in step.cells:
@@ -723,7 +724,7 @@ func _test_stitch_style() -> void:
 	_check(StitchPanel.describe_step(half, top_backslash).ends_with("( \\ )"), StitchPanel.describe_step(half, top_backslash))
 
 
-## English: whole crosses in blocks of at most MAX_BLOCK, every cell once, and the next segment
+## English: whole crosses in blocks of at most DEFAULT_MAX_BLOCK, every cell once, and the next segment
 ## starts near the far end where the needle stopped.
 func _test_english() -> void:
 	var got := _describe(StitchPlanner.plan(_pattern(["0000000", "0000000"]), 0, true, true,
@@ -736,7 +737,7 @@ func _test_english() -> void:
 	for thread in pattern.thread_codes.size():
 		var count := 0
 		for step in session.steps(thread):
-			_check(step.kind == StitchStep.Kind.CROSS and step.cells.size() <= StitchPlanner.MAX_BLOCK,
+			_check(step.kind == StitchStep.Kind.CROSS and step.cells.size() <= StitchPlanner.DEFAULT_MAX_BLOCK,
 					"english steps are crosses of at most 5")
 			count += step.cells.size()
 		_check(count == pattern.stitch_counts()[thread], "english covers %s once" % pattern.thread_codes[thread])
@@ -784,3 +785,36 @@ func _test_whole_back_pass() -> void:
 	_check(split == ["HALF row 0 [0, 1, 2, 3]", "HALF row 0 [4, 5, 6]", "BACK row 0 [6, 5, 4]",
 			"BACK row 0 [3, 2, 1, 0]"], "half finished return pass is split: %s" % [split])
 	_check(row.done_count(0) == 3 and row.cell_states() == partial, "its finished part counts as done")
+
+
+## The most stitches per block is a setting: every step keeps to it (a whole return pass only
+## stops at gaps), and changing it keeps every stitch.
+func _test_max_block() -> void:
+	var got := _describe(StitchPlanner.plan(_pattern(["0000000"]), 0, true, true,
+			StitchPlanner.UNLIMITED, false, false, 3))
+	_check(got == ["HALF row 0 [0, 1, 2]", "HALF row 0 [3, 4]", "HALF row 0 [5, 6]",
+			"BACK row 0 [6, 5, 4]", "BACK row 0 [3, 2]", "BACK row 0 [1, 0]"], "blocks of 3: %s" % [got])
+	got = _describe(StitchPlanner.plan(_pattern(["0000000"]), 0, true, true,
+			StitchPlanner.UNLIMITED, false, true, 10))
+	_check(got == ["HALF row 0 [0, 1, 2, 3, 4, 5, 6]", "BACK row 0 [6, 5, 4, 3, 2, 1, 0]"],
+			"blocks of 10: %s" % [got])
+	var pattern := PatternImporter.from_image(load("res://samples/hypsi_anhaenger.png") as Image, FlossPalette.dmc())
+	var session := StitchSession.new(pattern)
+	for i in 9:
+		session.advance(0)
+	var states := session.cell_states()
+	for size in [2, 1, 8, StitchPlanner.DEFAULT_MAX_BLOCK]:
+		session.set_max_block(size)
+		_check(session.max_block == size, "max_block set to %d" % size)
+		for thread in pattern.thread_codes.size():
+			for step in session.steps(thread):
+				_check(step.cells.size() <= size or step.kind == StitchStep.Kind.CROSS and step.cells.size() == 1,
+						"%d: a step of %d stitches" % [size, step.cells.size()])
+		_check(session.cell_states() == states, "blocks of %d keep every stitch" % size)
+	for english in [false, true]:
+		session.set_english(english)
+		session.set_max_block(2)
+		for step in session.steps(0):
+			_check(step.cells.size() <= 2, "english %s: blocks of 2" % english)
+		session.set_max_block(StitchPlanner.DEFAULT_MAX_BLOCK)
+	_check(Preferences.max_block() >= 1, "preference readable")

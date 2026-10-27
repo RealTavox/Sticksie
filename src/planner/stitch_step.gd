@@ -1,6 +1,6 @@
 class_name StitchStep
 extends RefCounted
-## One guided step: up to StitchPlanner.MAX_BLOCK stitches of one thread in one row, in one
+## One guided step: up to max_block stitches (see StitchPlanner) of one thread in one row, in one
 ## direction (a whole return pass may be longer, see StitchPlanner).
 
 enum Kind {

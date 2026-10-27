@@ -20,7 +20,7 @@ item is resolved during normal work, delete its entry in the same change.
 
 - Project code: `src/` (`project/` saving: `StitchProject` and its JSON format, `ProjectStore`
   files in `user://projects/` (list with preview picture, rename, delete) and the last opened project, `Preferences` app-wide settings in
-  `settings.cfg` next to the projects (skip limit, start corner, stitch method, the advanced
+  `settings.cfg` next to the projects (skip limit, start corner, stitch method, block size, the advanced
   stitch style; not saved in the project file, pushed into the open project); `palette/` thread colours and Lab matching, `pattern/` the `Pattern`
   resource, `import/` PNG → pattern, `planner/` Danish stitch order (`StitchPlanner` →
   `StitchStep`s), `stitching/` progress per thread (`StitchSession`), the back of the fabric
@@ -61,7 +61,7 @@ How to check a change; every fix and feature runs these. Godot binary:
    and again with `1280x720` for landscape; look at the PNGs. Add `--stitch=<DMC code>
    --steps=<n>` for the stitching screen after n confirmed steps, `--max-skip=<n>` to set the
    skip limit (-1: none), `--start=<top-left|top-right|bottom-left|bottom-right>` the start corner, `--settings` to open the settings dialog, `--projects` the project list, `--back` the back side while stitching,
-   `--method=<danish|english>`, `--back-pass=<whole|blocks>`, `--needle=<auto|bottom|top>`, `--first-leg=<slash|backslash>`
+   `--method=<danish|english>`, `--back-pass=<whole|blocks>`, `--max-block=<n>`, `--needle=<auto|bottom|top>`, `--first-leg=<slash|backslash>`
    (both fix the style), `--advanced` with `--settings` for the advanced part. In zsh, pass each user
    argument as its own word (an unsplit `"$args"` arrives as one argument and is ignored).
 
@@ -84,7 +84,8 @@ informational. Changing the format needs the user's OK and a new
 
 Fixed in `src/planner/stitch_planner.gd`, decided with the user (DESIGN.md "Offene Punkte"):
 a row segment ends at a gap of more than 3 cells (`MAX_GAP`); a segment of one stitch becomes a
-single full cross; blocks hold at most 5 stitches (`MAX_BLOCK`) and are split evenly
+single full cross; blocks hold at most `max_block` stitches (`Preferences.max_block()`, default 5 =
+`DEFAULT_MAX_BLOCK`; `StitchSession.set_max_block()` replans like the skip limit) and are split evenly
 (7 → 4 + 3); a block never has a gap inside: each run of adjacent cells is split on its own and
 the thread skips on the back only between blocks; every segment starts at its end nearer to the needle (on a tie the start side; legs stay `/` then `\` either way), and the Danish return pass ends there. Order: segments
 in neighbouring rows that overlap or touch diagonally form an area (`connected_areas()`); an

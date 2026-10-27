@@ -1,10 +1,10 @@
 class_name StitchPlanner
 ## Plans the stitching order of one thread with the Danish method (DESIGN.md, section 2):
 ## per row segment, first the bottom legs outward, then the top legs back, in blocks of at most
-## MAX_BLOCK stitches. A block never has a gap inside: the thread skips cells on the back only
-## between blocks. A segment of a single stitch becomes one full cross. A segment starts at
-## whichever end is nearer to the needle (on a tie, the start side); the Danish return pass brings
-## the needle back there. Keeping the thread is worth more than keeping every row in one direction.
+## `max_block` stitches (a user preference, DEFAULT_MAX_BLOCK by default). A block never has a
+## gap inside: the thread skips cells on the back only between blocks. A segment of a single
+## stitch becomes one full cross. A segment starts at whichever end is nearer to the needle (on a
+## tie, the start side); the Danish return pass brings the needle back there. Keeping the thread is worth more than keeping every row in one direction.
 ## With the English method (a user preference) each block is a step of whole crosses instead,
 ## one after the other, and the needle ends at the segment's far end. With `whole_back` (a user
 ## preference, the app's default) the Danish return pass isn't split into blocks: it runs over
@@ -18,8 +18,8 @@ class_name StitchPlanner
 ## Thread changes: with a skip limit (user preference), a step whose way from the previous one
 ## skips more cells on the back starts a new thread. Without a limit only the first step does.
 
-## Most stitches in one step.
-const MAX_BLOCK := 5
+## Most stitches in one block unless the user sets another limit.
+const DEFAULT_MAX_BLOCK := 5
 ## Most cells a Danish pass skips inside a row; a bigger gap splits the row into segments.
 ## A lower skip limit lowers it further.
 const MAX_GAP := 3
@@ -31,10 +31,11 @@ const UNLIMITED := -1
 ## end nearer to the needle; the Danish return pass brings the needle back there. `top_to_bottom`
 ## and `start_left` set the row order and the start side used on ties. `max_skip` is the most cells the thread may skip
 ## on the back before a new thread is needed. `english` plans whole crosses instead of Danish passes.
-## `whole_back` makes each return pass one step per run of adjacent cells.
+## `whole_back` makes each return pass one step per run of adjacent cells. `max_block` is the most
+## stitches in one block.
 static func plan(pattern: Pattern, thread: int, top_to_bottom := true,
 		start_left := true, max_skip := UNLIMITED, english := false,
-		whole_back := false) -> Array[StitchStep]:
+		whole_back := false, max_block := DEFAULT_MAX_BLOCK) -> Array[StitchStep]:
 	var steps: Array[StitchStep] = []
 	var rows := range(pattern.height)
 	if not top_to_bottom:
@@ -64,7 +65,7 @@ static func plan(pattern: Pattern, thread: int, top_to_bottom := true,
 			segment.reverse()
 			direction = -direction
 		steps.append_array(_segment_steps(segment, thread, segment_rows[next], direction, english,
-				whole_back))
+				whole_back, max_block))
 		# The Danish return pass (or a single cross) ends where the segment began, English
 		# crosses at its far end.
 		needle = Vector2i(segment[-1] if english else segment[0], segment_rows[next])
@@ -193,7 +194,7 @@ static func row_segments(pattern: Pattern, thread: int, y: int,
 
 ## Splits `cells` into ceil(n / max_size) blocks of nearly equal size, larger blocks first
 ## (7 → 4 + 3), so no block is a lone leftover stitch when it can be avoided.
-static func split_blocks(cells: PackedInt32Array, max_size := MAX_BLOCK) -> Array[PackedInt32Array]:
+static func split_blocks(cells: PackedInt32Array, max_size := DEFAULT_MAX_BLOCK) -> Array[PackedInt32Array]:
 	var blocks: Array[PackedInt32Array] = []
 	var count := ceili(float(cells.size()) / max_size)
 	var start := 0
@@ -205,30 +206,31 @@ static func split_blocks(cells: PackedInt32Array, max_size := MAX_BLOCK) -> Arra
 
 
 static func _segment_steps(segment: PackedInt32Array, thread: int, y: int,
-		direction: int, english := false, whole_back := false) -> Array[StitchStep]:
+		direction: int, english := false, whole_back := false,
+		max_block := DEFAULT_MAX_BLOCK) -> Array[StitchStep]:
 	var steps: Array[StitchStep] = []
 	if segment.size() == 1:
 		steps.append(StitchStep.new(StitchStep.Kind.CROSS, thread, y, segment, 0))
 		return steps
 	if english:
-		return _pass_steps(segment, StitchStep.Kind.CROSS, thread, y, direction)
-	steps.append_array(_pass_steps(segment, StitchStep.Kind.HALF, thread, y, direction))
+		return _pass_steps(segment, StitchStep.Kind.CROSS, thread, y, direction, max_block)
+	steps.append_array(_pass_steps(segment, StitchStep.Kind.HALF, thread, y, direction, max_block))
 	var back := segment.duplicate()
 	back.reverse()
 	steps.append_array(_pass_steps(back, StitchStep.Kind.BACK, thread, y, -direction,
-			whole_back))
+			0 if whole_back else max_block))
 	return steps
 
 
-## One pass over `cells` (in stitching order): each run of adjacent cells is split into blocks
-## on its own (or, with `whole`, stays one step), so gaps fall between steps.
+## One pass over `cells` (in stitching order): each run of adjacent cells is split into blocks of
+## at most `max_block` on its own (or, with 0, stays one step), so gaps fall between steps.
 static func _pass_steps(cells: PackedInt32Array, kind: StitchStep.Kind, thread: int, y: int,
-		direction: int, whole := false) -> Array[StitchStep]:
+		direction: int, max_block: int) -> Array[StitchStep]:
 	var steps: Array[StitchStep] = []
 	for run in adjacent_runs(cells):
 		var blocks: Array[PackedInt32Array] = [run]
-		if not whole:
-			blocks = split_blocks(run)
+		if max_block > 0:
+			blocks = split_blocks(run, max_block)
 		for block in blocks:
 			steps.append(StitchStep.new(kind, thread, y, block, direction))
 	return steps

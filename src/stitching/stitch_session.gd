@@ -35,6 +35,9 @@ var english := false
 ## Danish return pass in one step per run of adjacent cells instead of blocks of 5. Change it
 ## with set_whole_back(), which replans. Not saved with the project either.
 var whole_back := false
+## Most stitches in one block. Change it with set_max_block(), which replans. Not saved with the
+## project either.
+var max_block := StitchPlanner.DEFAULT_MAX_BLOCK
 
 var _plans := {}  # thread index -> Array[StitchStep]
 ## Per thread index, one flag per planned step: 1 when done. Not just "the first n steps", since
@@ -52,7 +55,7 @@ func _init(p_pattern: Pattern) -> void:
 func steps(thread: int) -> Array[StitchStep]:
 	if not _plans.has(thread):
 		_plans[thread] = StitchPlanner.plan(pattern, thread, top_to_bottom, start_left, max_skip, english,
-				whole_back)
+				whole_back, max_block)
 	return _plans[thread]
 
 
@@ -137,6 +140,15 @@ func set_whole_back(value: bool) -> void:
 		return
 	var states := cell_states()
 	whole_back = value
+	_replan(states)
+
+
+## Changes the most stitches per block and replans, keeping progress like set_max_skip().
+func set_max_block(value: int) -> void:
+	if value == max_block:
+		return
+	var states := cell_states()
+	max_block = value
 	_replan(states)
 
 
