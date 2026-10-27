@@ -18,6 +18,10 @@ func _initialize() -> void:
 	_test_session()
 	_test_position_hint()
 	_test_describe_offset()
+	_test_session_restore()
+	_test_project_round_trip()
+	_test_project_rejects_bad_data()
+	_test_project_store()
 	if _failures == 0:
 		print("All tests passed.")
 	else:
@@ -311,3 +315,125 @@ func _test_describe_offset() -> void:
 	for offset: Vector2i in cases:
 		var got := StitchPanel.describe_offset(offset, ref)
 		_check(got == cases[offset], "describe %s: %s" % [offset, got])
+
+
+func _test_session_restore() -> void:
+	var pattern := _pattern(["0000000", "00..000"])
+	var original := StitchSession.new(pattern)
+	for i in 5:
+		original.advance(0)
+	var states := original.cell_states()
+
+	var same := StitchSession.new(pattern)
+	same.restore(PackedInt32Array([5]), states)
+	_check(same.done_count(0) == 5, "matching progress restores as saved")
+
+	# Saved step count doesn't fit the states (e.g. planner rules changed): recount from states.
+	var recounted := StitchSession.new(pattern)
+	recounted.restore(PackedInt32Array([2]), states)
+	_check(recounted.done_count(0) == 5, "mismatch is recounted from states, got %d" % recounted.done_count(0))
+	_check(recounted.cell_states() == states, "recounted progress shows the same stitches")
+
+	var empty := StitchSession.new(pattern)
+	var none := PackedByteArray()
+	none.resize(states.size())
+	none.fill(StitchSession.Cell.NONE)
+	empty.restore(PackedInt32Array([3]), none)
+	_check(empty.done_count(0) == 0, "no stitched cells means no progress")
+
+
+func _sample_project() -> StitchProject:
+	var palette := FlossPalette.dmc()
+	var image := load("res://samples/hypsi_anhaenger.png") as Image
+	var project := StitchProject.create("Hypsi Anhänger", image, palette)
+	project.fabric_codes = PackedStringArray(["800"])
+	project.rebuild(palette)
+	var thread := project.pattern.thread_codes.find("3837")
+	for i in 9:
+		project.session.advance(thread)
+	project.session.advance(project.pattern.thread_codes.find("718"))
+	return project
+
+
+## Save and load through JSON text, as on disk.
+func _test_project_round_trip() -> void:
+	var project := _sample_project()
+	var text := JSON.stringify(project.to_dict())
+	var loaded := StitchProject.from_dict(JSON.parse_string(text))
+	_check(loaded != null, "project loads")
+	if loaded == null:
+		return
+	_check(loaded.name == "Hypsi Anhänger", "name survives")
+	_check(loaded.fabric_codes == PackedStringArray(["800"]), "fabric choice survives")
+	_check(loaded.pattern.thread_codes == project.pattern.thread_codes
+			and loaded.pattern.cells == project.pattern.cells, "pattern survives")
+	_check(loaded.image.get_size() == project.image.get_size()
+			and loaded.image.get_pixel(5, 5) == project.image.get_pixel(5, 5), "image survives")
+	for thread in project.pattern.thread_codes.size():
+		_check(loaded.session.done_count(thread) == project.session.done_count(thread),
+				"progress of %s survives" % project.pattern.thread_codes[thread])
+	_check(loaded.session.cell_states() == project.session.cell_states(), "stitched cells survive")
+
+
+func _test_project_rejects_bad_data() -> void:
+	var good := _sample_project().to_dict()
+	var cases := {}
+	var newer := good.duplicate(true)
+	newer.format = StitchProject.FORMAT + 1
+	cases["newer format"] = newer
+	var no_image := good.duplicate(true)
+	no_image.erase("image_png")
+	cases["missing image"] = no_image
+	var short_cells := good.duplicate(true)
+	short_cells.pattern.width = 61
+	cases["cell count mismatch"] = short_cells
+	var bad_thread := good.duplicate(true)
+	bad_thread.pattern.thread_codes = ["310"]
+	cases["cell refers to missing thread"] = bad_thread
+	var short_states := good.duplicate(true)
+	short_states.progress.cell_states = Marshalls.raw_to_base64(PackedByteArray([0, 1]))
+	cases["progress size mismatch"] = short_states
+	for what: String in cases:
+		_check(StitchProject.from_dict(cases[what]) == null, "rejects %s" % what)
+
+
+func _test_project_store() -> void:
+	var previous_directory := ProjectStore.directory
+	ProjectStore.directory = "user://test_projects"
+	_clear_directory(ProjectStore.directory)
+
+	var project := _sample_project()
+	_check(ProjectStore.save(project) == OK, "project saves")
+	_check(project.path == "user://test_projects/hypsi_anhaenger.json", "file name from project name: %s" % project.path)
+	var second := _sample_project()
+	ProjectStore.save(second)
+	_check(second.path == "user://test_projects/hypsi_anhaenger_2.json", "second file gets a number: %s" % second.path)
+	_check(not FileAccess.file_exists(project.path + ".tmp"), "no temporary file left")
+
+	project.session.advance(0)
+	ProjectStore.save(project)
+	var loaded := ProjectStore.load_project(project.path)
+	_check(loaded != null and loaded.session.done_count(0) == project.session.done_count(0),
+			"saving again overwrites with the new progress")
+	_check(ProjectStore.list().size() == 2, "both projects listed")
+
+	ProjectStore.remember_last(second.path)
+	_check(ProjectStore.last_project_path() == second.path, "last project remembered")
+
+	var broken := FileAccess.open(ProjectStore.directory.path_join("broken.json"), FileAccess.WRITE)
+	broken.store_string("{ not json")
+	broken.close()
+	_check(ProjectStore.load_project(ProjectStore.directory.path_join("broken.json")) == null,
+			"broken file doesn't load")
+	_check(ProjectStore.list().size() == 2, "broken file isn't listed")
+
+	_clear_directory(ProjectStore.directory)
+	DirAccess.remove_absolute(ProjectStore.directory)
+	ProjectStore.directory = previous_directory
+
+
+func _clear_directory(path: String) -> void:
+	if not DirAccess.dir_exists_absolute(path):
+		return
+	for file_name in DirAccess.get_files_at(path):
+		DirAccess.remove_absolute(path.path_join(file_name))

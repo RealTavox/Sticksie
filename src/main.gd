@@ -1,10 +1,12 @@
 extends Control
 ## Start screen: open a pixel-art image, show it as a cross-stitch pattern with its threads, and
-## stitch one thread at a time with step-by-step guidance.
+## stitch one thread at a time with step-by-step guidance. Every change is saved right away; on
+## start the last project opens again.
 ##
-## Command line (after `--`): `--open=<path>` opens an image, `--stitch=<code>` starts stitching
-## that thread, `--steps=<n>` confirms n steps, `--screenshot=<png path>` saves a screenshot after
-## a few frames and quits.
+## Command line (after `--`): `--projects-dir=<path>` keeps projects in another folder (for test
+## runs), `--open=<path>` opens an image as a new project, `--stitch=<code>` starts stitching that
+## thread, `--steps=<n>` confirms n steps, `--screenshot=<png path>` saves a screenshot after a few
+## frames and quits.
 
 const SAMPLE_PATH := "res://samples/hypsi_anhaenger.png"
 ## Images bigger than this on either side are refused (most likely a photo, not pixel art).
@@ -16,19 +18,17 @@ const STITCH_CELL_PX := 24.0
 const CREDIT := "Garnfarben: craft-color-codes von MakeBead (makebead.com), CC BY 4.0"
 
 var _palette: FlossPalette
-var _image: Image
+var _project: StitchProject
 ## Pattern with every colour of the image, for the colour list.
 var _full_pattern: Pattern
-## Pattern without the fabric colours: what gets stitched.
-var _pattern: Pattern
-## Thread codes the user marked as fabric (not stitched).
-var _fabric_codes := PackedStringArray()
-var _session: StitchSession
-## Thread index in `_pattern` being stitched, or -1 on the overview.
+## Thread index in the project's pattern being stitched, or -1 on the overview.
 var _stitch_thread := -1
 
 var _open_button: Button
 var _sample_button: Button
+var _projects_button: MenuButton
+## Project file paths, indexed like the items of the projects menu.
+var _project_paths: Array[String] = []
 var _overview_button: Button
 var _info_label: Label
 var _body: BoxContainer
@@ -44,6 +44,15 @@ func _ready() -> void:
 	_build_ui()
 	resized.connect(_update_layout)
 	_update_layout()
+	var opens_image := false
+	for arg in OS.get_cmdline_user_args():
+		if arg.begins_with("--projects-dir="):
+			ProjectStore.directory = arg.trim_prefix("--projects-dir=")
+		opens_image = opens_image or arg.begins_with("--open=")
+	if not opens_image:
+		var last := ProjectStore.last_project_path()
+		if not last.is_empty() and FileAccess.file_exists(last):
+			_open_project(last)
 	_handle_cmdline()
 
 
@@ -70,6 +79,15 @@ func _build_ui() -> void:
 	toolbar.add_child(_open_button)
 	_sample_button = _make_toolbar_button("Beispiel", _open_image.bind(SAMPLE_PATH))
 	toolbar.add_child(_sample_button)
+	_projects_button = MenuButton.new()
+	_projects_button.text = "Projekte"
+	_projects_button.flat = false
+	_projects_button.custom_minimum_size.y = BUTTON_HEIGHT
+	_projects_button.focus_mode = Control.FOCUS_NONE
+	_projects_button.about_to_popup.connect(_fill_projects_menu)
+	_projects_button.get_popup().id_pressed.connect(
+			func(id: int) -> void: _open_project(_project_paths[id]))
+	toolbar.add_child(_projects_button)
 	_overview_button = _make_toolbar_button("◂ Übersicht", _leave_stitching)
 	_overview_button.visible = false
 	toolbar.add_child(_overview_button)
@@ -159,26 +177,62 @@ func _open_image(path: String) -> void:
 		return
 	if image.is_compressed():
 		image.decompress()
+	_set_project(StitchProject.create(path.get_file().get_basename(), image, _palette))
+	_save()
+
+
+func _open_project(path: String) -> void:
+	var project := ProjectStore.load_project(path)
+	if project == null:
+		_info_label.text = "Projekt konnte nicht geladen werden."
+		return
+	_set_project(project)
+	ProjectStore.remember_last(path)
+
+
+func _set_project(project: StitchProject) -> void:
 	_leave_stitching()
-	_image = image
-	_full_pattern = PatternImporter.from_image(image, _palette)
-	_fabric_codes = PackedStringArray()
+	_project = project
+	_full_pattern = project.full_pattern(_palette)
 	_show_pattern(false)
 
 
-## Rebuilds the stitched pattern from the image and the fabric choice. Starts a new stitching
-## session, so earlier progress is gone.
 func _show_pattern(keep_view: bool) -> void:
-	_pattern = PatternImporter.from_image(_image, _palette, _fabric_codes)
-	_session = StitchSession.new(_pattern)
-	_view.show_pattern(_pattern, _palette, keep_view)
+	_view.show_pattern(_project.pattern, _palette, keep_view)
 	_show_info()
 	_fill_color_list()
 
 
+## Saves the project; called after every change, so nothing is lost when the app closes.
+func _save() -> void:
+	var error := ProjectStore.save(_project)
+	if error != OK:
+		_info_label.text = "Speichern fehlgeschlagen: %s" % error_string(error)
+		return
+	ProjectStore.remember_last(_project.path)
+
+
 func _show_info() -> void:
-	_info_label.text = "%d × %d Felder · %d Farben · %d Stiche" % [
-			_pattern.width, _pattern.height, _pattern.thread_codes.size(), _pattern.total_stitches()]
+	var pattern := _project.pattern
+	var text := "%s · %d × %d Felder · %d Farben · %d Stiche" % [_project.name,
+			pattern.width, pattern.height, pattern.thread_codes.size(), pattern.total_stitches()]
+	var done := _project.finished_crosses()
+	if done > 0:
+		text += " · %d %% fertig" % floori(100.0 * done / pattern.total_stitches())
+	_info_label.text = text
+
+
+func _fill_projects_menu() -> void:
+	var popup := _projects_button.get_popup()
+	popup.clear()
+	_project_paths.clear()
+	for entry in ProjectStore.list():
+		popup.add_item("%s  (%s)" % [entry.name, str(entry.saved_at).replace("T", " ").left(16)],
+				_project_paths.size())
+		_project_paths.append(entry.path)
+	if _project_paths.is_empty():
+		popup.add_item("Noch keine Projekte")
+		popup.set_item_disabled(0, true)
 
 
 ## One row per thread of the image, most stitches first.
@@ -194,7 +248,8 @@ func _fill_color_list() -> void:
 
 
 func _make_color_row(floss: FlossColor, count: int) -> Control:
-	var thread := _pattern.thread_codes.find(floss.code)
+	var session := _project.session
+	var thread := _project.pattern.thread_codes.find(floss.code)
 	var row := HBoxContainer.new()
 	var swatch := ColorRect.new()
 	swatch.color = floss.color
@@ -211,17 +266,17 @@ func _make_color_row(floss: FlossColor, count: int) -> Control:
 	row.add_child(name_label)
 	var count_label := Label.new()
 	count_label.text = str(count)
-	if thread >= 0 and _session.done_count(thread) > 0:
-		count_label.text = "%d / %d" % [_session.finished_crosses(thread), count]
+	if thread >= 0 and session.done_count(thread) > 0:
+		count_label.text = "%d / %d" % [session.finished_crosses(thread), count]
 	count_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	count_label.custom_minimum_size.x = 56.0
 	row.add_child(count_label)
 	var fabric_box := CheckBox.new()
 	fabric_box.text = "Stoff"
-	fabric_box.button_pressed = _fabric_codes.has(floss.code)
+	fabric_box.button_pressed = _project.fabric_codes.has(floss.code)
 	fabric_box.focus_mode = Control.FOCUS_NONE
 	# Changing the fabric rebuilds the pattern, which would lose the stitching progress.
-	fabric_box.disabled = _session.has_progress()
+	fabric_box.disabled = session.has_progress()
 	fabric_box.tooltip_text = ("Geht nicht mehr, es wurde schon gestickt." if fabric_box.disabled
 			else "Diese Farbe nicht sticken, hier bleibt der Stoff frei.")
 	fabric_box.toggled.connect(_on_fabric_toggled.bind(floss.code))
@@ -236,11 +291,15 @@ func _make_color_row(floss: FlossColor, count: int) -> Control:
 
 
 func _on_fabric_toggled(pressed: bool, code: String) -> void:
-	if pressed and not _fabric_codes.has(code):
-		_fabric_codes.append(code)
-	elif not pressed and _fabric_codes.has(code):
-		_fabric_codes.remove_at(_fabric_codes.find(code))
+	var fabric_codes := _project.fabric_codes
+	if pressed and not fabric_codes.has(code):
+		fabric_codes.append(code)
+	elif not pressed and fabric_codes.has(code):
+		fabric_codes.remove_at(fabric_codes.find(code))
+	_project.fabric_codes = fabric_codes
+	_project.rebuild(_palette)
 	_show_pattern(true)
+	_save()
 
 
 func _enter_stitching(thread: int) -> void:
@@ -249,8 +308,9 @@ func _enter_stitching(thread: int) -> void:
 	_stitch_panel.visible = true
 	_open_button.visible = false
 	_sample_button.visible = false
+	_projects_button.visible = false
 	_overview_button.visible = true
-	var step := _session.current_step(thread)
+	var step := _project.session.current_step(thread)
 	if step != null:
 		_view.focus_step(step, STITCH_CELL_PX)
 	# After zooming, so the reference stitch is panned into view as well.
@@ -265,6 +325,7 @@ func _leave_stitching() -> void:
 	_side.visible = true
 	_open_button.visible = true
 	_sample_button.visible = true
+	_projects_button.visible = true
 	_overview_button.visible = false
 	_view.show_preview()
 	_show_info()
@@ -273,33 +334,37 @@ func _leave_stitching() -> void:
 
 func _refresh_stitching() -> void:
 	var thread := _stitch_thread
-	var step := _session.current_step(thread)
-	var states := _session.cell_states()
+	var session := _project.session
+	var pattern := _project.pattern
+	var step := session.current_step(thread)
+	var states := session.cell_states()
 	var hint: PositionHint = null
 	var position_text := ""
 	if step != null:
-		hint = PositionHint.find(_pattern, states, step, _session.last_cell(thread))
-		position_text = StitchPanel.describe_position(step, hint, _pattern, states)
+		hint = PositionHint.find(pattern, states, step, session.last_cell(thread))
+		position_text = StitchPanel.describe_position(step, hint, pattern, states)
 	_view.show_progress(states, step, hint)
 	if step != null:
 		_view.ensure_visible(step, hint)
-	var floss := _palette.find_code(_pattern.thread_codes[thread])
-	_stitch_panel.show_step(floss, step, position_text, _session.done_count(thread),
-			_session.steps(thread).size(), _session.finished_crosses(thread),
-			_pattern.stitch_counts()[thread])
+	var floss := _palette.find_code(pattern.thread_codes[thread])
+	_stitch_panel.show_step(floss, step, position_text, session.done_count(thread),
+			session.steps(thread).size(), session.finished_crosses(thread),
+			pattern.stitch_counts()[thread])
 	_info_label.text = ""
 
 
 func _next_step() -> void:
-	if _stitch_thread >= 0 and _session.current_step(_stitch_thread) != null:
-		_session.advance(_stitch_thread)
+	if _stitch_thread >= 0 and _project.session.current_step(_stitch_thread) != null:
+		_project.session.advance(_stitch_thread)
 		_refresh_stitching()
+		_save()
 
 
 func _previous_step() -> void:
-	if _stitch_thread >= 0:
-		_session.go_back(_stitch_thread)
+	if _stitch_thread >= 0 and _project.session.done_count(_stitch_thread) > 0:
+		_project.session.go_back(_stitch_thread)
 		_refresh_stitching()
+		_save()
 
 
 func _on_view_tapped() -> void:
@@ -319,9 +384,9 @@ func _handle_cmdline() -> void:
 			steps = arg.trim_prefix("--steps=").to_int()
 		elif arg.begins_with("--screenshot="):
 			screenshot_path = arg.trim_prefix("--screenshot=")
-	if not stitch_code.is_empty() and _pattern != null and _pattern.thread_codes.has(stitch_code):
+	if not stitch_code.is_empty() and _project != null and _project.pattern.thread_codes.has(stitch_code):
 		await get_tree().process_frame  # Let the screen lay out first, as before a real tap.
-		_enter_stitching(_pattern.thread_codes.find(stitch_code))
+		_enter_stitching(_project.pattern.thread_codes.find(stitch_code))
 		for i in steps:
 			_next_step()
 	if screenshot_path.is_empty():

@@ -18,7 +18,8 @@ item is resolved during normal work, delete its entry in the same change.
 
 ### Code scope
 
-- Project code: `src/` (`palette/` thread colours and Lab matching, `pattern/` the `Pattern`
+- Project code: `src/` (`project/` saving: `StitchProject` and its JSON format, `ProjectStore`
+  files in `user://projects/` and the last opened project; `palette/` thread colours and Lab matching, `pattern/` the `Pattern`
   resource, `import/` PNG → pattern, `planner/` Danish stitch order (`StitchPlanner` →
   `StitchStep`s), `stitching/` progress per thread (`StitchSession`, not saved yet) and position hints
   (`PositionHint`: the nearest findable stitch to count from, any colour: the last stitch
@@ -45,16 +46,27 @@ How to check a change; every fix and feature runs these. Godot binary:
    and exits 0. Plain checks without a framework (Lab/CIEDE2000 against Sharma's reference
    pairs, DMC palette, importing the sample, stitch planner incl. that every cell of the sample
    is crossed exactly once, stitching progress, position hints and their wording).
-3. `$G --headless --path . --quit-after 120 -- --open=res://samples/hypsi_anhaenger.png --stitch=3837 --steps=7 2>&1 | grep -E "ERROR|WARNING"`:
-   no output.
+3. `$G --headless --path . --quit-after 120 -- --projects-dir=<scratch dir> --open=res://samples/hypsi_anhaenger.png --stitch=3837 --steps=7 2>&1 | grep -E "ERROR|WARNING"`:
+   no output. Always pass `--projects-dir` with a scratch folder: every run that opens an image
+   saves a project, and without it that lands in the user's real projects.
 4. Screenshot (opens a window for a moment):
-   `$G --path . --resolution 720x1280 -- --open=res://samples/hypsi_anhaenger.png --screenshot=<abs path>.png`,
+   `$G --path . --resolution 720x1280 -- --projects-dir=<scratch dir> --open=res://samples/hypsi_anhaenger.png --screenshot=<abs path>.png`,
    and again with `1280x720` for landscape; look at the PNGs. Add `--stitch=<DMC code>
    --steps=<n>` for the stitching screen after n confirmed steps. In zsh, pass each user
    argument as its own word (an unsplit `"$args"` arrives as one argument and is ignored).
 
 Touch input (pan, pinch) and the native file dialog are not covered by these; check them on a
-device or in the editor and say so in the report.
+device or in the editor and say so in the report. Resuming: run once with `--open` and
+`--steps`, then again with only `--projects-dir` (the last project opens by itself).
+
+### Save format
+
+`StitchProject.to_dict()`, one JSON file per project, `format` 1. It holds the image (PNG,
+base64), fabric codes, the pattern itself (so palette or matching changes can't alter a pattern
+being stitched) and progress twice: finished steps per thread code and the cell states. On load,
+a thread whose steps don't reproduce the saved cells (planner rules changed) is recounted from
+the cells (`StitchSession.restore()`). Changing the format needs the user's OK and a new
+`format` number with a migration for older files.
 
 ### Planner rules
 
