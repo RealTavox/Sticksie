@@ -38,6 +38,16 @@ static func set_english(value: bool) -> void:
 	_store("english", value)
 
 
+## Whether the Danish return pass goes over every run of adjacent cells in one step (default)
+## instead of blocks of at most 5.
+static func whole_back() -> bool:
+	return bool(_load().get_value("stitching", "whole_back", true))
+
+
+static func set_whole_back(value: bool) -> void:
+	_store("whole_back", value)
+
+
 ## Advanced: whether the user fixed the leg order and needle direction (see StitchStyle); off by
 ## default, then the app picks the cleanest back.
 static func needle_fixed() -> bool:

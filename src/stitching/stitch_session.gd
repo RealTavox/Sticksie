@@ -32,6 +32,9 @@ var max_skip := StitchPlanner.UNLIMITED
 ## English method: whole crosses one by one instead of Danish passes. Change it with
 ## set_english(), which replans. Not saved with the project; it comes from the preferences.
 var english := false
+## Danish return pass in one step per run of adjacent cells instead of blocks of 5. Change it
+## with set_whole_back(), which replans. Not saved with the project either.
+var whole_back := false
 
 var _plans := {}  # thread index -> Array[StitchStep]
 ## Per thread index, one flag per planned step: 1 when done. Not just "the first n steps", since
@@ -48,7 +51,8 @@ func _init(p_pattern: Pattern) -> void:
 
 func steps(thread: int) -> Array[StitchStep]:
 	if not _plans.has(thread):
-		_plans[thread] = StitchPlanner.plan(pattern, thread, top_to_bottom, start_left, max_skip, english)
+		_plans[thread] = StitchPlanner.plan(pattern, thread, top_to_bottom, start_left, max_skip, english,
+				whole_back)
 	return _plans[thread]
 
 
@@ -123,6 +127,16 @@ func set_english(value: bool) -> void:
 		return
 	var states := cell_states()
 	english = value
+	_replan(states)
+
+
+## Switches the Danish return pass between blocks and whole runs and replans, keeping progress
+## like set_max_skip().
+func set_whole_back(value: bool) -> void:
+	if value == whole_back:
+		return
+	var states := cell_states()
+	whole_back = value
 	_replan(states)
 
 
@@ -228,17 +242,27 @@ func cell_states() -> PackedByteArray:
 ## Restores progress from saved cell states: a step is done when the fabric already shows it
 ## (its cells have at least a bottom leg for half stitches, a whole cross otherwise). This works
 ## whatever order the plan has now, so changed settings or planner rules keep the progress.
+##
+## A step whose first cells are stitched and the rest not (a longer step in the new plan, e.g. a
+## whole return pass after blocks of 5) is split there, so those stitches aren't lost.
 func restore(saved_states: PackedByteArray) -> void:
 	_done.clear()
 	for thread in pattern.thread_codes.size():
 		var all := steps(thread)
-		var flags := _flags(thread)
-		for i in all.size():
-			var needed := Cell.HALF if all[i].kind == StitchStep.Kind.HALF else Cell.FULL
-			var shown := true
-			for x in all[i].cells:
-				shown = shown and saved_states[all[i].row * pattern.width + x] >= needed
-			flags[i] = 1 if shown else 0
+		var flags := PackedByteArray()
+		var i := 0
+		while i < all.size():
+			var step := all[i]
+			var needed := Cell.HALF if step.kind == StitchStep.Kind.HALF else Cell.FULL
+			var shown := 0
+			while shown < step.cells.size() and saved_states[step.row * pattern.width + step.cells[shown]] >= needed:
+				shown += 1
+			if shown > 0 and shown < step.cells.size():
+				var rest := StitchStep.new(step.kind, thread, step.row, step.cells.slice(shown), step.direction)
+				step.cells = step.cells.slice(0, shown)
+				all.insert(i + 1, rest)
+			flags.append(1 if shown == step.cells.size() else 0)
+			i += 1
 		_done[thread] = flags
 
 

@@ -6,7 +6,9 @@ class_name StitchPlanner
 ## whichever end is nearer to the needle (on a tie, the start side); the Danish return pass brings
 ## the needle back there. Keeping the thread is worth more than keeping every row in one direction.
 ## With the English method (a user preference) each block is a step of whole crosses instead,
-## one after the other, and the needle ends at the segment's far end.
+## one after the other, and the needle ends at the segment's far end. With `whole_back` (a user
+## preference, the app's default) the Danish return pass isn't split into blocks: it runs over
+## each run of adjacent cells in one step, still never across a gap.
 ##
 ## Order: one connected area of the thread is finished before the next begins. Inside an area the
 ## stitched part grows without holes: the next segment must touch a finished one, preferably the
@@ -29,8 +31,10 @@ const UNLIMITED := -1
 ## end nearer to the needle; the Danish return pass brings the needle back there. `top_to_bottom`
 ## and `start_left` set the row order and the start side used on ties. `max_skip` is the most cells the thread may skip
 ## on the back before a new thread is needed. `english` plans whole crosses instead of Danish passes.
+## `whole_back` makes each return pass one step per run of adjacent cells.
 static func plan(pattern: Pattern, thread: int, top_to_bottom := true,
-		start_left := true, max_skip := UNLIMITED, english := false) -> Array[StitchStep]:
+		start_left := true, max_skip := UNLIMITED, english := false,
+		whole_back := false) -> Array[StitchStep]:
 	var steps: Array[StitchStep] = []
 	var rows := range(pattern.height)
 	if not top_to_bottom:
@@ -59,7 +63,8 @@ static func plan(pattern: Pattern, thread: int, top_to_bottom := true,
 			segment = segment.duplicate()
 			segment.reverse()
 			direction = -direction
-		steps.append_array(_segment_steps(segment, thread, segment_rows[next], direction, english))
+		steps.append_array(_segment_steps(segment, thread, segment_rows[next], direction, english,
+				whole_back))
 		# The Danish return pass (or a single cross) ends where the segment began, English
 		# crosses at its far end.
 		needle = Vector2i(segment[-1] if english else segment[0], segment_rows[next])
@@ -200,7 +205,7 @@ static func split_blocks(cells: PackedInt32Array, max_size := MAX_BLOCK) -> Arra
 
 
 static func _segment_steps(segment: PackedInt32Array, thread: int, y: int,
-		direction: int, english := false) -> Array[StitchStep]:
+		direction: int, english := false, whole_back := false) -> Array[StitchStep]:
 	var steps: Array[StitchStep] = []
 	if segment.size() == 1:
 		steps.append(StitchStep.new(StitchStep.Kind.CROSS, thread, y, segment, 0))
@@ -210,17 +215,21 @@ static func _segment_steps(segment: PackedInt32Array, thread: int, y: int,
 	steps.append_array(_pass_steps(segment, StitchStep.Kind.HALF, thread, y, direction))
 	var back := segment.duplicate()
 	back.reverse()
-	steps.append_array(_pass_steps(back, StitchStep.Kind.BACK, thread, y, -direction))
+	steps.append_array(_pass_steps(back, StitchStep.Kind.BACK, thread, y, -direction,
+			whole_back))
 	return steps
 
 
 ## One pass over `cells` (in stitching order): each run of adjacent cells is split into blocks
-## on its own, so gaps fall between blocks.
+## on its own (or, with `whole`, stays one step), so gaps fall between steps.
 static func _pass_steps(cells: PackedInt32Array, kind: StitchStep.Kind, thread: int, y: int,
-		direction: int) -> Array[StitchStep]:
+		direction: int, whole := false) -> Array[StitchStep]:
 	var steps: Array[StitchStep] = []
 	for run in adjacent_runs(cells):
-		for block in split_blocks(run):
+		var blocks: Array[PackedInt32Array] = [run]
+		if not whole:
+			blocks = split_blocks(run)
+		for block in blocks:
 			steps.append(StitchStep.new(kind, thread, y, block, direction))
 	return steps
 

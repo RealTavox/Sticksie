@@ -31,6 +31,7 @@ func _initialize() -> void:
 	_test_back_side()
 	_test_stitch_style()
 	_test_english()
+	_test_whole_back_pass()
 	if _failures == 0:
 		print("All tests passed.")
 	else:
@@ -745,3 +746,41 @@ func _test_english() -> void:
 	_check(session.cell_states() == states, "switching method keeps finished crosses")
 	session.set_english(true)
 	_check(session.done_count(0) == 1, "and back again")
+
+
+## With whole return passes the half stitches stay in blocks, the return pass covers each run of
+## adjacent cells in one step and still stops at every gap.
+func _test_whole_back_pass() -> void:
+	var got := _describe(StitchPlanner.plan(_pattern(["0000000..00"]), 0, true, true,
+			StitchPlanner.UNLIMITED, false, true))
+	_check(got == ["HALF row 0 [0, 1, 2, 3]", "HALF row 0 [4, 5, 6]", "HALF row 0 [9, 10] skip 2",
+			"BACK row 0 [10, 9]", "BACK row 0 [6, 5, 4, 3, 2, 1, 0] skip 2"], "whole return pass: %s" % [got])
+	var pattern := PatternImporter.from_image(load("res://samples/hypsi_anhaenger.png") as Image, FlossPalette.dmc())
+	var session := StitchSession.new(pattern)
+	for i in 12:
+		session.advance(0)
+	var states := session.cell_states()
+	session.set_whole_back(true)
+	for thread in pattern.thread_codes.size():
+		var half := 0
+		var back := 0
+		for step in session.steps(thread):
+			_check(StitchPlanner.adjacent_runs(step.cells).size() == 1, "no gap inside a step")
+			if step.kind == StitchStep.Kind.HALF:
+				half += step.cells.size()
+			elif step.kind == StitchStep.Kind.BACK:
+				back += step.cells.size()
+		_check(half == back, "%s: every half stitch gets its return stitch" % pattern.thread_codes[thread])
+	_check(session.cell_states() == states, "switching keeps every stitch, also of a half finished return pass")
+	session.set_whole_back(false)
+	_check(session.cell_states() == states, "and back to blocks")
+
+	# A whole return pass stitched up to its middle: the plan splits it there.
+	var row := StitchSession.new(_pattern(["0000000"]))
+	row.whole_back = true
+	var partial := PackedByteArray([1, 1, 1, 1, 2, 2, 2])
+	row.restore(partial)
+	var split := _describe(row.steps(0))
+	_check(split == ["HALF row 0 [0, 1, 2, 3]", "HALF row 0 [4, 5, 6]", "BACK row 0 [6, 5, 4]",
+			"BACK row 0 [3, 2, 1, 0]"], "half finished return pass is split: %s" % [split])
+	_check(row.done_count(0) == 3 and row.cell_states() == partial, "its finished part counts as done")

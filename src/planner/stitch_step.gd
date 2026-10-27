@@ -1,7 +1,7 @@
 class_name StitchStep
 extends RefCounted
 ## One guided step: up to StitchPlanner.MAX_BLOCK stitches of one thread in one row, in one
-## direction.
+## direction (a whole return pass may be longer, see StitchPlanner).
 
 enum Kind {
 	## Danish outward pass: the bottom legs of the crosses.

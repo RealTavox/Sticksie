@@ -61,7 +61,7 @@ How to check a change; every fix and feature runs these. Godot binary:
    and again with `1280x720` for landscape; look at the PNGs. Add `--stitch=<DMC code>
    --steps=<n>` for the stitching screen after n confirmed steps, `--max-skip=<n>` to set the
    skip limit (-1: none), `--start=<top-left|top-right|bottom-left|bottom-right>` the start corner, `--settings` to open the settings dialog, `--projects` the project list, `--back` the back side while stitching,
-   `--method=<danish|english>`, `--needle=<auto|bottom|top>`, `--first-leg=<slash|backslash>`
+   `--method=<danish|english>`, `--back-pass=<whole|blocks>`, `--needle=<auto|bottom|top>`, `--first-leg=<slash|backslash>`
    (both fix the style), `--advanced` with `--settings` for the advanced part. In zsh, pass each user
    argument as its own word (an unsplit `"$args"` arrives as one argument and is ignored).
 
@@ -75,7 +75,8 @@ device or in the editor and say so in the report. Resuming: run once with `--ope
 and `progress.manual_thread_starts`; format 1 files load with no limit and no manual changes). It holds the image (PNG,
 base64), fabric codes, the pattern itself (so palette or matching changes can't alter a pattern
 being stitched) and progress as cell states; a step counts as done when the cells already show
-it (`StitchSession.restore()`), so any plan order works. `done_steps` per thread code is only
+it (`StitchSession.restore()`), so any plan order works; a step whose first cells show it and
+the rest not is split there in the plan, so a longer step after replanning loses no stitches. `done_steps` per thread code is only
 informational. Changing the format needs the user's OK and a new
 `format` number with a migration for older files.
 
@@ -92,6 +93,10 @@ are open segments touching the one just finished, then open segments of the area
 finished one, then other areas. Within a tier the nearest to the needle wins (Chebyshev skip from
 the end the last segment began at to the nearer end of the candidate), ties go to row order. `tests/run_tests.gd` checks on the
 sample that every segment after an area's first touches an earlier one.
+
+Whole return pass (`Preferences.whole_back()`, default on; `StitchSession.set_whole_back()`
+replans): the Danish return pass is one `BACK` step per run of adjacent cells instead of blocks
+of 5; half stitches stay in blocks, and a step still never spans a gap. Off: blocks as above.
 
 English method (`Preferences.english()`, `StitchSession.set_english()` replans like the skip
 limit): every block is a `CROSS` step of whole crosses, in the same blocks, and the needle ends

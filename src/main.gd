@@ -7,7 +7,8 @@ extends Control
 ## runs), `--open=<path>` opens an image as a new project, `--max-skip=<n>` sets the skip limit
 ## (-1: none), `--start=<corner>` sets the start corner (top-left, top-right, bottom-left,
 ## bottom-right), `--settings` opens the settings dialog (`--advanced`: with the advanced part open),
-## `--method=<english|danish>` sets the stitch method, `--needle=<auto|bottom|top>` and
+## `--method=<english|danish>` sets the stitch method, `--back-pass=<whole|blocks>` the Danish
+## return pass, `--needle=<auto|bottom|top>` and
 ## `--first-leg=<slash|backslash>` the stitch style (bottom/top/first-leg fix it), `--projects` the project list, `--stitch=<code>` starts stitching that thread, `--steps=<n>` confirms n steps, `--back` shows the back while stitching, `--screenshot=<png path>` saves a screenshot after a few
 ## frames and quits.
 
@@ -55,6 +56,7 @@ var _limit_box: CheckBox
 var _corner_option: OptionButton
 var _limit_spin: SpinBox
 var _method_option: OptionButton
+var _whole_back_box: CheckBox
 var _advanced_button: Button
 var _advanced_box: VBoxContainer
 var _needle_option: OptionButton
@@ -182,7 +184,11 @@ func _build_settings_dialog() -> void:
 	method_label.text = "Stichmethode:"
 	content.add_child(method_label)
 	_method_option = _make_option(METHODS)
+	_method_option.item_selected.connect(func(index: int) -> void: _whole_back_box.disabled = index == 1)
 	content.add_child(_method_option)
+	_whole_back_box = CheckBox.new()
+	_whole_back_box.text = "Dänisch: Rückweg in einem Zug bis zur nächsten Lücke (statt in 5er-Blöcken)"
+	content.add_child(_whole_back_box)
 	content.add_child(HSeparator.new())
 	var corner_label := Label.new()
 	corner_label.text = "Anfangen in der Ecke:"
@@ -331,6 +337,8 @@ func _show_settings() -> void:
 		_limit_spin.value = limit
 	_corner_option.selected = _corner_index(Preferences.top_to_bottom(), Preferences.start_left())
 	_method_option.selected = 1 if Preferences.english() else 0
+	_whole_back_box.button_pressed = Preferences.whole_back()
+	_whole_back_box.disabled = Preferences.english()
 	_needle_option.selected = 1 if Preferences.needle_fixed() else 0
 	_leg_option.selected = 0 if Preferences.slash_first() else 1
 	_needle_start_option.selected = 1 if Preferences.needle_from_top() else 0
@@ -350,6 +358,7 @@ func _apply_settings() -> void:
 	var corner: Array = START_CORNERS[_corner_option.selected]
 	Preferences.set_direction(corner[1], corner[2])
 	Preferences.set_english(_method_option.selected == 1)
+	Preferences.set_whole_back(_whole_back_box.button_pressed)
 	Preferences.set_stitch_style(_needle_option.selected == 1, _leg_option.selected == 0,
 			_needle_start_option.selected == 1)
 	_apply_style()
@@ -368,6 +377,7 @@ func _apply_preferences() -> void:
 	_project.session.set_max_skip(Preferences.max_skip())
 	_project.session.set_direction(Preferences.top_to_bottom(), Preferences.start_left())
 	_project.session.set_english(Preferences.english())
+	_project.session.set_whole_back(Preferences.whole_back())
 
 
 ## Hands the leg order and needle holes from the preferences to the view and the guide texts.
@@ -659,6 +669,10 @@ func _handle_cmdline() -> void:
 			_show_advanced.call_deferred(true)
 		elif arg.begins_with("--method="):
 			Preferences.set_english(arg.trim_prefix("--method=") == "english")
+			if _project != null:
+				_apply_preferences()
+		elif arg.begins_with("--back-pass="):
+			Preferences.set_whole_back(arg.trim_prefix("--back-pass=") == "whole")
 			if _project != null:
 				_apply_preferences()
 		elif arg.begins_with("--needle="):
