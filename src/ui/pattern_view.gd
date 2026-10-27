@@ -12,8 +12,10 @@ const GRID_COLOR := Color(0.0, 0.0, 0.0, 0.12)
 ## Every 10th line is darker, as on printed charts.
 const GRID_MAJOR_COLOR := Color(0.0, 0.0, 0.0, 0.4)
 const HIGHLIGHT_COLOR := Color(1.0, 0.5, 0.05)
-## Reference stitch and counting path of the position hint.
+## Reference stitch of the position hint, and the left/right leg of its counting path.
 const HINT_COLOR := Color(0.1, 0.45, 0.95)
+## The up/down leg of the counting path.
+const HINT_VERTICAL_COLOR := Color(0.7, 0.1, 0.65)
 ## Below this cell size the counting path shows dots instead of numbers.
 const MIN_NUMBER_CELL_PX := 14.0
 ## Where the old thread ends (to be secured) and where a new one begins.
@@ -264,39 +266,57 @@ func _draw_highlight(step: StitchStep) -> void:
 
 
 ## A ring around the reference stitch, a line along the counting path ending in an arrow, and
-## the count in every cell of the path.
+## the count in every cell of the path. Each leg has its own colour (left/right, up/down) and
+## counts from 1 again: "1, 2 down, then 1, 2, 3 right".
 func _draw_hint(hint: PositionHint) -> void:
 	var reference := _cell_rect(hint.reference.x, hint.reference.y)
 	var line_width := maxf(2.0, _cell_px * 0.08)
 	draw_arc(reference.get_center(), _cell_px * 0.62, 0.0, TAU, 32, HINT_COLOR, line_width)
 	if hint.path.is_empty():
 		return
-	var points := PackedVector2Array([reference.get_center()])
+	var corners: Array[Vector2i] = [hint.reference]
 	var corner := hint.corner()
 	if corner != hint.reference and corner != hint.target:
-		points.append(_cell_rect(corner.x, corner.y).get_center())
+		corners.append(corner)
+	corners.append(hint.target)
+	for i in range(1, corners.size()):
+		var from := _cell_rect(corners[i - 1].x, corners[i - 1].y).get_center()
+		var to := _cell_rect(corners[i].x, corners[i].y).get_center()
+		draw_line(from, to, Color(_leg_color(corners[i] - corners[i - 1]), 0.6), line_width)
+	var last_leg := corners[-1] - corners[-2]
 	var target := _cell_rect(hint.target.x, hint.target.y).get_center()
-	points.append(target)
-	draw_polyline(points, Color(HINT_COLOR, 0.6), line_width)
-	var direction := (points[-1] - points[-2]).normalized()
+	var direction := Vector2(last_leg).normalized()
 	var tip := target - direction * _cell_px * 0.1
 	var side := direction.orthogonal() * _cell_px * 0.2
 	var back := tip - direction * _cell_px * 0.3
-	draw_colored_polygon(PackedVector2Array([tip, back + side, back - side]), HINT_COLOR)
+	draw_colored_polygon(PackedVector2Array([tip, back + side, back - side]), _leg_color(last_leg))
 	if hint.path.size() < 2:
 		return  # Directly adjacent: nothing to count.
 	var font := get_theme_default_font()
 	var font_size := int(_cell_px * 0.42)
-	for i in hint.path.size():
-		var center := _cell_rect(hint.path[i].x, hint.path[i].y).get_center()
+	var count := 0
+	var previous := hint.reference
+	var previous_step := Vector2i.ZERO
+	for cell in hint.path:
+		var step := cell - previous
+		count = count + 1 if step == previous_step else 1
+		previous = cell
+		previous_step = step
+		var color := _leg_color(step)
+		var center := _cell_rect(cell.x, cell.y).get_center()
 		if _cell_px < MIN_NUMBER_CELL_PX:
-			draw_circle(center, maxf(1.5, _cell_px * 0.12), HINT_COLOR)
+			draw_circle(center, maxf(1.5, _cell_px * 0.12), color)
 			continue
-		var text := str(i + 1)
+		var text := str(count)
 		var text_size := font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size)
 		var baseline := center + Vector2(-text_size.x / 2.0, -text_size.y / 2.0 + font.get_ascent(font_size))
 		draw_circle(center, _cell_px * 0.3, Color(FABRIC_COLOR, 0.85))
-		draw_string(font, baseline, text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, HINT_COLOR)
+		draw_string(font, baseline, text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, color)
+
+
+## Colour of a counting leg going along `offset`: one for left/right, one for up/down.
+func _leg_color(offset: Vector2i) -> Color:
+	return HINT_VERTICAL_COLOR if offset.x == 0 else HINT_COLOR
 
 
 ## The old thread ends here: a red ring with a knot across the last stitch, labelled
