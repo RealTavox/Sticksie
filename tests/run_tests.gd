@@ -474,6 +474,28 @@ func _test_project_store() -> void:
 			"broken file doesn't load")
 	_check(ProjectStore.list().size() == 2, "broken file isn't listed")
 
+	var entry: Dictionary = ProjectStore.list().filter(
+			func(e: Dictionary) -> bool: return e.path == project.path)[0]
+	_check(entry.preview is Image and entry.preview.get_size() == project.image.get_size(),
+			"list preview is the source image")
+	_check(entry.width == project.pattern.width and entry.height == project.pattern.height,
+			"list shows the pattern size")
+	var saved_at: String = entry.saved_at
+	_check(ProjectStore.rename(project.path, "  Neuer Name ") == OK, "project renames")
+	loaded = ProjectStore.load_project(project.path)
+	_check(loaded != null and loaded.name == "Neuer Name", "renamed project loads with the new name")
+	_check(loaded != null and loaded.session.done_count(0) == project.session.done_count(0),
+			"renaming keeps the progress")
+	_check(ProjectStore.list().any(func(e: Dictionary) -> bool:
+			return e.path == project.path and e.saved_at == saved_at), "renaming keeps the save time")
+	_check(ProjectStore.rename(project.path, "  ") != OK, "empty name is refused")
+	_check(ProjectStore.load_project(project.path).name == "Neuer Name", "refused rename changes nothing")
+
+	_check(ProjectStore.delete(second.path) == OK, "project deletes")
+	_check(not FileAccess.file_exists(second.path), "deleted file is gone")
+	_check(ProjectStore.last_project_path().is_empty(), "deleted project is no longer the last one")
+	_check(ProjectStore.list().size() == 1, "deleted project isn't listed")
+
 	_clear_directory(ProjectStore.directory)
 	DirAccess.remove_absolute(ProjectStore.directory)
 	ProjectStore.directory = previous_directory

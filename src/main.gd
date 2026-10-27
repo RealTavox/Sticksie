@@ -6,7 +6,7 @@ extends Control
 ## Command line (after `--`): `--projects-dir=<path>` keeps projects in another folder (for test
 ## runs), `--open=<path>` opens an image as a new project, `--max-skip=<n>` sets the skip limit
 ## (-1: none), `--start=<corner>` sets the start corner (top-left, top-right, bottom-left,
-## bottom-right), `--settings` opens the settings dialog, `--stitch=<code>` starts stitching that thread, `--steps=<n>` confirms n steps, `--screenshot=<png path>` saves a screenshot after a few
+## bottom-right), `--settings` opens the settings dialog, `--projects` the project list, `--stitch=<code>` starts stitching that thread, `--steps=<n>` confirms n steps, `--screenshot=<png path>` saves a screenshot after a few
 ## frames and quits.
 
 const SAMPLE_PATH := "res://samples/hypsi_anhaenger.png"
@@ -34,13 +34,12 @@ var _stitch_thread := -1
 
 var _open_button: Button
 var _sample_button: Button
-var _projects_button: MenuButton
+var _projects_button: Button
+var _project_browser: ProjectBrowser
 var _settings_dialog: AcceptDialog
 var _limit_box: CheckBox
 var _corner_option: OptionButton
 var _limit_spin: SpinBox
-## Project file paths, indexed like the items of the projects menu.
-var _project_paths: Array[String] = []
 var _overview_button: Button
 var _info_label: Label
 var _body: BoxContainer
@@ -91,14 +90,7 @@ func _build_ui() -> void:
 	toolbar.add_child(_open_button)
 	_sample_button = _make_toolbar_button("Beispiel", _open_image.bind(SAMPLE_PATH))
 	toolbar.add_child(_sample_button)
-	_projects_button = MenuButton.new()
-	_projects_button.text = "Projekte"
-	_projects_button.flat = false
-	_projects_button.custom_minimum_size.y = BUTTON_HEIGHT
-	_projects_button.focus_mode = Control.FOCUS_NONE
-	_projects_button.about_to_popup.connect(_fill_projects_menu)
-	_projects_button.get_popup().id_pressed.connect(
-			func(id: int) -> void: _open_project(_project_paths[id]))
+	_projects_button = _make_toolbar_button("Projekte", _show_projects)
 	toolbar.add_child(_projects_button)
 	toolbar.add_child(_make_toolbar_button("Einstellungen", _show_settings))
 	_overview_button = _make_toolbar_button("◂ Übersicht", _leave_stitching)
@@ -145,6 +137,11 @@ func _build_ui() -> void:
 	_stitch_panel.new_thread_toggled.connect(_toggle_new_thread)
 	_body.add_child(_stitch_panel)
 	_build_settings_dialog()
+	_project_browser = ProjectBrowser.new()
+	_project_browser.open_requested.connect(_open_project)
+	_project_browser.project_renamed.connect(_on_project_renamed)
+	_project_browser.project_deleted.connect(_on_project_deleted)
+	add_child(_project_browser)
 
 
 func _build_settings_dialog() -> void:
@@ -321,17 +318,30 @@ func _show_info() -> void:
 	_info_label.text = text
 
 
-func _fill_projects_menu() -> void:
-	var popup := _projects_button.get_popup()
-	popup.clear()
-	_project_paths.clear()
-	for entry in ProjectStore.list():
-		popup.add_item("%s  (%s)" % [entry.name, str(entry.saved_at).replace("T", " ").left(16)],
-				_project_paths.size())
-		_project_paths.append(entry.path)
-	if _project_paths.is_empty():
-		popup.add_item("Noch keine Projekte")
-		popup.set_item_disabled(0, true)
+func _show_projects() -> void:
+	_project_browser.current_path = _project.path if _project != null else ""
+	_project_browser.open()
+
+
+## The project list renamed a file; the open project takes the name, or its next save would
+## bring the old one back.
+func _on_project_renamed(path: String, new_name: String) -> void:
+	if _project != null and _project.path == path:
+		_project.name = new_name
+		_show_info()
+
+
+## The project list deleted a file; if it was the open project, the screen goes back to empty.
+func _on_project_deleted(path: String) -> void:
+	if _project == null or _project.path != path:
+		return
+	_leave_stitching()
+	_project = null
+	_full_pattern = null
+	_view.clear()
+	for child in _color_list.get_children():
+		child.queue_free()
+	_info_label.text = "Projekt gelöscht. Öffne ein Bild oder ein anderes Projekt."
 
 
 ## One row per thread of the image, most stitches first.
@@ -502,6 +512,8 @@ func _handle_cmdline() -> void:
 			steps = arg.trim_prefix("--steps=").to_int()
 		elif arg == "--settings":
 			_show_settings.call_deferred()
+		elif arg == "--projects":
+			_show_projects.call_deferred()
 		elif arg.begins_with("--max-skip="):
 			Preferences.set_max_skip(arg.trim_prefix("--max-skip=").to_int())
 			if _project != null:

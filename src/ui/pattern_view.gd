@@ -104,6 +104,13 @@ func show_progress(states: PackedByteArray, highlight: StitchStep, hint: Positio
 	queue_redraw()
 
 
+## Shows nothing (no project open).
+func clear() -> void:
+	pattern = null
+	_texture = null
+	show_preview()
+
+
 func show_preview() -> void:
 	_states = PackedByteArray()
 	_highlight = null

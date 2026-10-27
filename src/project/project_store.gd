@@ -7,24 +7,14 @@ class_name ProjectStore
 static var directory := "user://projects"
 
 
-## Saves `project`, giving it a new file name on its first save. Writes to a temporary file
-## first, so a crash while saving leaves the previous save intact.
+## Saves `project`, giving it a new file name on its first save.
 static func save(project: StitchProject) -> Error:
 	var error := DirAccess.make_dir_recursive_absolute(directory)
 	if error != OK:
 		return error
 	if project.path.is_empty():
 		project.path = _new_path(project.name)
-	var temp_path := project.path + ".tmp"
-	var file := FileAccess.open(temp_path, FileAccess.WRITE)
-	if file == null:
-		return FileAccess.get_open_error()
-	file.store_string(JSON.stringify(project.to_dict()))
-	error = file.get_error()
-	file.close()
-	if error != OK:
-		return error
-	return DirAccess.rename_absolute(temp_path, project.path)
+	return _write_json(project.path, project.to_dict())
 
 
 ## The project saved at `path`, or null if it can't be read.
@@ -38,7 +28,8 @@ static func load_project(path: String) -> StitchProject:
 	return project
 
 
-## Saved projects, most recently saved first: [{path, name, saved_at}].
+## Saved projects, most recently saved first: [{path, name, saved_at, width, height, preview}],
+## `preview` an Image or null (see preview()).
 static func list() -> Array[Dictionary]:
 	var result: Array[Dictionary] = []
 	for file_name in DirAccess.get_files_at(directory):
@@ -47,10 +38,48 @@ static func list() -> Array[Dictionary]:
 		var path := directory.path_join(file_name)
 		var data: Variant = _read_json(path)
 		if data is Dictionary:
+			var pattern_data: Variant = data.get("pattern", {})
+			if not pattern_data is Dictionary:
+				pattern_data = {}
 			result.append({"path": path, "name": str(data.get("name", file_name)),
-					"saved_at": str(data.get("saved_at", ""))})
+					"saved_at": str(data.get("saved_at", "")),
+					"width": int(pattern_data.get("width", 0)),
+					"height": int(pattern_data.get("height", 0)),
+					"preview": preview(data)})
 	result.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return a.saved_at > b.saved_at)
 	return result
+
+
+## The picture shown for a saved project (its `to_dict()` form) in the project list, or null.
+## For now the pixel art the project was made from; the place to switch to a picture of the
+## stitching progress later.
+static func preview(data: Dictionary) -> Image:
+	var png := Marshalls.base64_to_raw(str(data.get("image_png", "")))
+	var image := Image.new()
+	if png.is_empty() or image.load_png_from_buffer(png) != OK:
+		return null
+	return image
+
+
+## Gives the project saved at `path` a new name. The file keeps its name and its save time, so
+## the list order stays.
+static func rename(path: String, new_name: String) -> Error:
+	new_name = new_name.strip_edges()
+	if new_name.is_empty():
+		return ERR_INVALID_PARAMETER
+	var data: Variant = _read_json(path)
+	if not data is Dictionary:
+		return ERR_FILE_CORRUPT
+	data.name = new_name
+	return _write_json(path, data)
+
+
+## Deletes the project saved at `path` for good; forgets it as the last opened project.
+static func delete(path: String) -> Error:
+	var error := DirAccess.remove_absolute(path)
+	if error == OK and last_project_path() == path:
+		remember_last("")
+	return error
 
 
 static func last_project_path() -> String:
@@ -65,6 +94,20 @@ static func remember_last(path: String) -> void:
 	config.load(Preferences.path())  # Missing file: start empty.
 	config.set_value("projects", "last", path)
 	config.save(Preferences.path())
+
+
+## Writes to a temporary file first, so a crash while saving leaves the previous save intact.
+static func _write_json(path: String, data: Dictionary) -> Error:
+	var temp_path := path + ".tmp"
+	var file := FileAccess.open(temp_path, FileAccess.WRITE)
+	if file == null:
+		return FileAccess.get_open_error()
+	file.store_string(JSON.stringify(data))
+	var error := file.get_error()
+	file.close()
+	if error != OK:
+		return error
+	return DirAccess.rename_absolute(temp_path, path)
 
 
 static func _read_json(path: String) -> Variant:
