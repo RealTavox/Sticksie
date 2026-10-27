@@ -5,7 +5,8 @@ extends Control
 ##
 ## Command line (after `--`): `--projects-dir=<path>` keeps projects in another folder (for test
 ## runs), `--open=<path>` opens an image as a new project, `--max-skip=<n>` sets the skip limit
-## (-1: none), `--settings` opens the settings dialog, `--stitch=<code>` starts stitching that thread, `--steps=<n>` confirms n steps, `--screenshot=<png path>` saves a screenshot after a few
+## (-1: none), `--start=<corner>` sets the start corner (top-left, top-right, bottom-left,
+## bottom-right), `--settings` opens the settings dialog, `--stitch=<code>` starts stitching that thread, `--steps=<n>` confirms n steps, `--screenshot=<png path>` saves a screenshot after a few
 ## frames and quits.
 
 const SAMPLE_PATH := "res://samples/hypsi_anhaenger.png"
@@ -15,6 +16,13 @@ const BUTTON_HEIGHT := 48.0
 const SWATCH_SIZE := Vector2(28, 28)
 ## Smallest cell size when stitching starts, so the current block is easy to see.
 const STITCH_CELL_PX := 24.0
+## Start corners in the settings: label and (top_to_bottom, start_left).
+const START_CORNERS := [
+	["Oben links: Reihen nach rechts, dann nach unten", true, true],
+	["Oben rechts: Reihen nach links, dann nach unten", true, false],
+	["Unten links: Reihen nach rechts, dann nach oben", false, true],
+	["Unten rechts: Reihen nach links, dann nach oben", false, false],
+]
 const CREDIT := "Garnfarben: craft-color-codes von MakeBead (makebead.com), CC BY 4.0"
 
 var _palette: FlossPalette
@@ -29,6 +37,7 @@ var _sample_button: Button
 var _projects_button: MenuButton
 var _settings_dialog: AcceptDialog
 var _limit_box: CheckBox
+var _corner_option: OptionButton
 var _limit_spin: SpinBox
 ## Project file paths, indexed like the items of the projects menu.
 var _project_paths: Array[String] = []
@@ -147,6 +156,21 @@ func _build_settings_dialog() -> void:
 	add_child(_settings_dialog)
 	var content := VBoxContainer.new()
 	_settings_dialog.add_child(content)
+	var corner_label := Label.new()
+	corner_label.text = "Anfangen in der Ecke:"
+	content.add_child(corner_label)
+	_corner_option = OptionButton.new()
+	_corner_option.custom_minimum_size.y = BUTTON_HEIGHT
+	for corner: Array in START_CORNERS:
+		_corner_option.add_item(corner[0])
+	content.add_child(_corner_option)
+	var corner_note := Label.new()
+	corner_note.text = ("Fläche für Fläche: Die Ecke bestimmt, wo es losgeht und welcher Abschnitt\n"
+			+ "bei gleichem Abstand zuerst kommt. Eine Reihe beginnt trotzdem am näheren Ende,\n"
+			+ "wenn der Faden dort schon ist.")
+	corner_note.modulate.a = 0.7
+	content.add_child(corner_note)
+	content.add_child(HSeparator.new())
 	_limit_box = CheckBox.new()
 	_limit_box.text = "Faden automatisch wechseln, wenn er auf der Rückseite mehr als"
 	content.add_child(_limit_box)
@@ -224,21 +248,35 @@ func _show_settings() -> void:
 	_limit_spin.editable = _limit_box.button_pressed
 	if limit != StitchPlanner.UNLIMITED:
 		_limit_spin.value = limit
+	_corner_option.selected = _corner_index(Preferences.top_to_bottom(), Preferences.start_left())
 	_settings_dialog.popup_centered()
+
+
+## Index into START_CORNERS of a row order and start side.
+static func _corner_index(top_to_bottom: bool, start_left: bool) -> int:
+	return (0 if top_to_bottom else 2) + (0 if start_left else 1)
 
 
 ## Stores the preferences and replans the open project; stitched cells stay stitched.
 func _apply_settings() -> void:
 	var limit := int(_limit_spin.value) if _limit_box.button_pressed else StitchPlanner.UNLIMITED
 	Preferences.set_max_skip(limit)
+	var corner: Array = START_CORNERS[_corner_option.selected]
+	Preferences.set_direction(corner[1], corner[2])
 	if _project == null:
 		return
-	_project.session.set_max_skip(limit)
+	_apply_preferences()
 	_save()
 	if _stitch_thread >= 0:
 		_refresh_stitching()
 	else:
 		_fill_color_list()
+
+
+## Replans the open project for the current preferences; stitched cells stay stitched.
+func _apply_preferences() -> void:
+	_project.session.set_max_skip(Preferences.max_skip())
+	_project.session.set_direction(Preferences.top_to_bottom(), Preferences.start_left())
 
 
 func _open_project(path: String) -> void:
@@ -253,7 +291,7 @@ func _open_project(path: String) -> void:
 func _set_project(project: StitchProject) -> void:
 	_leave_stitching()
 	_project = project
-	_project.session.set_max_skip(Preferences.max_skip())
+	_apply_preferences()
 	_full_pattern = project.full_pattern(_palette)
 	_show_pattern(false)
 
@@ -359,7 +397,7 @@ func _on_fabric_toggled(pressed: bool, code: String) -> void:
 		fabric_codes.remove_at(fabric_codes.find(code))
 	_project.fabric_codes = fabric_codes
 	_project.rebuild(_palette)
-	_project.session.set_max_skip(Preferences.max_skip())
+	_apply_preferences()
 	_show_pattern(true)
 	_save()
 
@@ -467,7 +505,12 @@ func _handle_cmdline() -> void:
 		elif arg.begins_with("--max-skip="):
 			Preferences.set_max_skip(arg.trim_prefix("--max-skip=").to_int())
 			if _project != null:
-				_project.session.set_max_skip(Preferences.max_skip())
+				_apply_preferences()
+		elif arg.begins_with("--start="):
+			var corner := arg.trim_prefix("--start=")
+			Preferences.set_direction(not corner.begins_with("bottom"), not corner.ends_with("right"))
+			if _project != null:
+				_apply_preferences()
 		elif arg.begins_with("--screenshot="):
 			screenshot_path = arg.trim_prefix("--screenshot=")
 	if not stitch_code.is_empty() and _project != null and _project.pattern.thread_codes.has(stitch_code):

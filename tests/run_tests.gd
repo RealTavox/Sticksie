@@ -14,6 +14,7 @@ func _initialize() -> void:
 	_test_split_blocks()
 	_test_planner_rows()
 	_test_planner_order()
+	_test_start_corner()
 	_test_planner_covers_sample()
 	_test_session()
 	_test_position_hint()
@@ -189,6 +190,41 @@ func _test_planner_order() -> void:
 	_check(got == expected, "segment from the nearer end: %s" % [got])
 	_check(steps[1].direction == -1 and steps[3].direction == 1 and _starts(steps) == [
 			true, false, false, false, false], "nearer end needs no new thread")
+
+
+## Each start corner begins its first row at that corner and works away from it; changing the
+## corner keeps progress, and the preference is stored.
+func _test_start_corner() -> void:
+	var pattern := _pattern(["000", "000"])
+	var first := {
+		[true, true]: "HALF row 0 [0, 1, 2]",
+		[true, false]: "HALF row 0 [2, 1, 0]",
+		[false, true]: "HALF row 1 [0, 1, 2]",
+		[false, false]: "HALF row 1 [2, 1, 0]",
+	}
+	for corner: Array in first:
+		var steps := StitchPlanner.plan(pattern, 0, corner[0], corner[1])
+		_check(str(steps[0]) == first[corner] and steps[2].row != steps[0].row,
+				"corner %s: %s" % [corner, _describe(steps)])
+
+	var session := StitchSession.new(pattern)
+	session.advance(0)
+	session.advance(0)
+	var before := session.cell_states()
+	session.set_direction(false, false)
+	_check(session.cell_states() == before and session.done_count(0) == 2,
+			"progress kept after changing the corner")
+	_check(str(session.current_step(0)) == "HALF row 1 [2, 1, 0]",
+			"bottom right corner next: %s" % session.current_step(0))
+
+	var previous_directory := ProjectStore.directory
+	ProjectStore.directory = "user://test_preferences"
+	_check(Preferences.top_to_bottom() and Preferences.start_left(), "default corner top left")
+	Preferences.set_direction(false, false)
+	_check(not Preferences.top_to_bottom() and not Preferences.start_left(), "corner preference stored")
+	DirAccess.remove_absolute(Preferences.path())
+	DirAccess.remove_absolute(ProjectStore.directory)
+	ProjectStore.directory = previous_directory
 
 
 ## Every cell of a thread is stitched exactly once as a whole cross, in blocks of at most 5.

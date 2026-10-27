@@ -20,7 +20,7 @@ item is resolved during normal work, delete its entry in the same change.
 
 - Project code: `src/` (`project/` saving: `StitchProject` and its JSON format, `ProjectStore`
   files in `user://projects/` and the last opened project, `Preferences` app-wide settings in
-  `settings.cfg` next to the projects; `palette/` thread colours and Lab matching, `pattern/` the `Pattern`
+  `settings.cfg` next to the projects (skip limit, start corner); `palette/` thread colours and Lab matching, `pattern/` the `Pattern`
   resource, `import/` PNG → pattern, `planner/` Danish stitch order (`StitchPlanner` →
   `StitchStep`s), `stitching/` progress per thread (`StitchSession`, not saved yet) and position hints
   (`PositionHint`: the nearest findable stitch to count from, any colour: the last stitch
@@ -54,7 +54,7 @@ How to check a change; every fix and feature runs these. Godot binary:
    `$G --path . --resolution 720x1280 -- --projects-dir=<scratch dir> --open=res://samples/hypsi_anhaenger.png --screenshot=<abs path>.png`,
    and again with `1280x720` for landscape; look at the PNGs. Add `--stitch=<DMC code>
    --steps=<n>` for the stitching screen after n confirmed steps, `--max-skip=<n>` to set the
-   skip limit (-1: none), `--settings` to open the settings dialog. In zsh, pass each user
+   skip limit (-1: none), `--start=<top-left|top-right|bottom-left|bottom-right>` the start corner, `--settings` to open the settings dialog. In zsh, pass each user
    argument as its own word (an unsplit `"$args"` arrives as one argument and is ignored).
 
 Touch input (pan, pinch) and the native file dialog are not covered by these; check them on a
@@ -91,6 +91,11 @@ skip limit (`Preferences.max_skip()`, default `StitchPlanner.UNLIMITED`), a step
 further `starts_thread`, and the in-row gap limit drops to min(3, limit). Manual thread changes
 live in `StitchSession` keyed by (first cell, kind), so they survive replanning; changing the
 limit replans via `StitchSession.set_max_skip()`, which takes progress over from the cells.
+
+Start corner: `Preferences.top_to_bottom()` / `start_left()` (default top left: rows to the
+right, then down) set the row order and the start side; they decide where the first segment
+begins and break ties. Changing them replans via `StitchSession.set_direction()` like the skip
+limit. `main.gd` `_apply_preferences()` pushes both preferences into the open project.
 
 Progress: `StitchSession` keeps a done flag per planned step, not a count, because after
 replanning finished stitches can lie anywhere in the new order. The current step is the first

@@ -10,10 +10,23 @@ static func max_skip() -> int:
 
 
 static func set_max_skip(value: int) -> void:
-	var config := _load()
-	config.set_value("stitching", "max_skip", value)
-	DirAccess.make_dir_recursive_absolute(ProjectStore.directory)
-	config.save(path())
+	_store("max_skip", value)
+
+
+## Whether rows are worked from the top down (default) or from the bottom up.
+static func top_to_bottom() -> bool:
+	return bool(_load().get_value("stitching", "top_to_bottom", true))
+
+
+## Whether stitching starts on the left (default) or on the right side.
+static func start_left() -> bool:
+	return bool(_load().get_value("stitching", "start_left", true))
+
+
+## Sets the start corner: the row order and the start side together.
+static func set_direction(p_top_to_bottom: bool, p_start_left: bool) -> void:
+	_store("top_to_bottom", p_top_to_bottom)
+	_store("start_left", p_start_left)
 
 
 static func path() -> String:
@@ -24,3 +37,10 @@ static func _load() -> ConfigFile:
 	var config := ConfigFile.new()
 	config.load(path())  # Missing file: defaults.
 	return config
+
+
+static func _store(key: String, value: Variant) -> void:
+	var config := _load()
+	config.set_value("stitching", key, value)
+	DirAccess.make_dir_recursive_absolute(ProjectStore.directory)
+	config.save(path())

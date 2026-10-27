@@ -23,6 +23,7 @@ enum ThreadStart {
 }
 
 var pattern: Pattern
+## Row order and start side (the start corner). Change them with set_direction(), which replans.
 var top_to_bottom := true
 var start_left := true
 ## Most cells the thread may skip on the back (StitchPlanner.UNLIMITED: no automatic changes).
@@ -95,6 +96,21 @@ func set_max_skip(value: int) -> void:
 		return
 	var states := cell_states()
 	max_skip = value
+	_replan(states)
+
+
+## Changes the start corner and replans every thread, keeping progress like set_max_skip().
+func set_direction(p_top_to_bottom: bool, p_start_left: bool) -> void:
+	if p_top_to_bottom == top_to_bottom and p_start_left == start_left:
+		return
+	var states := cell_states()
+	top_to_bottom = p_top_to_bottom
+	start_left = p_start_left
+	_replan(states)
+
+
+## Drops every plan and takes progress over from `states` (cell_states() taken before the change).
+func _replan(states: PackedByteArray) -> void:
 	_plans.clear()
 	restore(states)
 
