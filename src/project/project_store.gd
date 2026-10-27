@@ -55,20 +55,16 @@ static func list() -> Array[Dictionary]:
 
 static func last_project_path() -> String:
 	var config := ConfigFile.new()
-	if config.load(_settings_path()) != OK:
+	if config.load(Preferences.path()) != OK:
 		return ""
 	return str(config.get_value("projects", "last", ""))
 
 
 static func remember_last(path: String) -> void:
 	var config := ConfigFile.new()
-	config.load(_settings_path())  # Missing file: start empty.
+	config.load(Preferences.path())  # Missing file: start empty.
 	config.set_value("projects", "last", path)
-	config.save(_settings_path())
-
-
-static func _settings_path() -> String:
-	return directory.path_join("settings.cfg")
+	config.save(Preferences.path())
 
 
 static func _read_json(path: String) -> Variant:

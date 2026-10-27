@@ -4,8 +4,8 @@ extends Control
 ## start the last project opens again.
 ##
 ## Command line (after `--`): `--projects-dir=<path>` keeps projects in another folder (for test
-## runs), `--open=<path>` opens an image as a new project, `--stitch=<code>` starts stitching that
-## thread, `--steps=<n>` confirms n steps, `--screenshot=<png path>` saves a screenshot after a few
+## runs), `--open=<path>` opens an image as a new project, `--max-skip=<n>` sets the skip limit
+## (-1: none), `--settings` opens the settings dialog, `--stitch=<code>` starts stitching that thread, `--steps=<n>` confirms n steps, `--screenshot=<png path>` saves a screenshot after a few
 ## frames and quits.
 
 const SAMPLE_PATH := "res://samples/hypsi_anhaenger.png"
@@ -27,6 +27,9 @@ var _stitch_thread := -1
 var _open_button: Button
 var _sample_button: Button
 var _projects_button: MenuButton
+var _settings_dialog: AcceptDialog
+var _limit_box: CheckBox
+var _limit_spin: SpinBox
 ## Project file paths, indexed like the items of the projects menu.
 var _project_paths: Array[String] = []
 var _overview_button: Button
@@ -88,6 +91,7 @@ func _build_ui() -> void:
 	_projects_button.get_popup().id_pressed.connect(
 			func(id: int) -> void: _open_project(_project_paths[id]))
 	toolbar.add_child(_projects_button)
+	toolbar.add_child(_make_toolbar_button("Einstellungen", _show_settings))
 	_overview_button = _make_toolbar_button("◂ Übersicht", _leave_stitching)
 	_overview_button.visible = false
 	toolbar.add_child(_overview_button)
@@ -129,7 +133,40 @@ func _build_ui() -> void:
 	_stitch_panel.visible = false
 	_stitch_panel.next_pressed.connect(_next_step)
 	_stitch_panel.previous_pressed.connect(_previous_step)
+	_stitch_panel.new_thread_toggled.connect(_toggle_new_thread)
 	_body.add_child(_stitch_panel)
+	_build_settings_dialog()
+
+
+func _build_settings_dialog() -> void:
+	_settings_dialog = AcceptDialog.new()
+	_settings_dialog.title = "Einstellungen"
+	_settings_dialog.ok_button_text = "Übernehmen"
+	_settings_dialog.add_cancel_button("Abbrechen")
+	_settings_dialog.confirmed.connect(_apply_settings)
+	add_child(_settings_dialog)
+	var content := VBoxContainer.new()
+	_settings_dialog.add_child(content)
+	_limit_box = CheckBox.new()
+	_limit_box.text = "Faden automatisch wechseln, wenn er auf der Rückseite mehr als"
+	content.add_child(_limit_box)
+	var row := HBoxContainer.new()
+	content.add_child(row)
+	_limit_spin = SpinBox.new()
+	_limit_spin.min_value = 0
+	_limit_spin.max_value = 30
+	_limit_spin.value = 3
+	row.add_child(_limit_spin)
+	var unit := Label.new()
+	unit.text = "Felder überspringen müsste."
+	row.add_child(unit)
+	var note := Label.new()
+	note.text = ("Aus: Der Faden wird nie automatisch gewechselt, er darf beliebig weit springen.\n"
+			+ "Üblich sind 2–3 Felder: längere Fäden auf der Rückseite verhaken sich und scheinen durch.\n"
+			+ "Einen neuen Faden kannst du beim Sticken jederzeit selbst nehmen.")
+	note.modulate.a = 0.7
+	content.add_child(note)
+	_limit_box.toggled.connect(func(on: bool) -> void: _limit_spin.editable = on)
 
 
 func _make_toolbar_button(text: String, on_pressed: Callable) -> Button:
@@ -181,6 +218,29 @@ func _open_image(path: String) -> void:
 	_save()
 
 
+func _show_settings() -> void:
+	var limit := Preferences.max_skip()
+	_limit_box.button_pressed = limit != StitchPlanner.UNLIMITED
+	_limit_spin.editable = _limit_box.button_pressed
+	if limit != StitchPlanner.UNLIMITED:
+		_limit_spin.value = limit
+	_settings_dialog.popup_centered()
+
+
+## Stores the preferences and replans the open project; stitched cells stay stitched.
+func _apply_settings() -> void:
+	var limit := int(_limit_spin.value) if _limit_box.button_pressed else StitchPlanner.UNLIMITED
+	Preferences.set_max_skip(limit)
+	if _project == null:
+		return
+	_project.session.set_max_skip(limit)
+	_save()
+	if _stitch_thread >= 0:
+		_refresh_stitching()
+	else:
+		_fill_color_list()
+
+
 func _open_project(path: String) -> void:
 	var project := ProjectStore.load_project(path)
 	if project == null:
@@ -193,6 +253,7 @@ func _open_project(path: String) -> void:
 func _set_project(project: StitchProject) -> void:
 	_leave_stitching()
 	_project = project
+	_project.session.set_max_skip(Preferences.max_skip())
 	_full_pattern = project.full_pattern(_palette)
 	_show_pattern(false)
 
@@ -298,6 +359,7 @@ func _on_fabric_toggled(pressed: bool, code: String) -> void:
 		fabric_codes.remove_at(fabric_codes.find(code))
 	_project.fabric_codes = fabric_codes
 	_project.rebuild(_palette)
+	_project.session.set_max_skip(Preferences.max_skip())
 	_show_pattern(true)
 	_save()
 
@@ -340,16 +402,21 @@ func _refresh_stitching() -> void:
 	var states := session.cell_states()
 	var hint: PositionHint = null
 	var position_text := ""
+	var thread_start := StitchSession.ThreadStart.NONE
 	if step != null:
 		hint = PositionHint.find(pattern, states, step, session.last_cell(thread))
+		thread_start = session.thread_start(thread, session.done_count(thread))
 		position_text = StitchPanel.describe_position(step, hint, pattern, states)
+		var thread_text := StitchPanel.describe_thread(step, thread_start, session.max_skip)
+		if not thread_text.is_empty():
+			position_text = thread_text + "\n" + position_text
 	_view.show_progress(states, step, hint)
 	if step != null:
 		_view.ensure_visible(step, hint)
 	var floss := _palette.find_code(pattern.thread_codes[thread])
 	_stitch_panel.show_step(floss, step, position_text, session.done_count(thread),
 			session.steps(thread).size(), session.finished_crosses(thread),
-			pattern.stitch_counts()[thread])
+			pattern.stitch_counts()[thread], thread_start)
 	_info_label.text = ""
 
 
@@ -363,6 +430,13 @@ func _next_step() -> void:
 func _previous_step() -> void:
 	if _stitch_thread >= 0 and _project.session.done_count(_stitch_thread) > 0:
 		_project.session.go_back(_stitch_thread)
+		_refresh_stitching()
+		_save()
+
+
+func _toggle_new_thread() -> void:
+	if _stitch_thread >= 0:
+		_project.session.toggle_manual_start(_stitch_thread)
 		_refresh_stitching()
 		_save()
 
@@ -382,6 +456,12 @@ func _handle_cmdline() -> void:
 			stitch_code = arg.trim_prefix("--stitch=")
 		elif arg.begins_with("--steps="):
 			steps = arg.trim_prefix("--steps=").to_int()
+		elif arg == "--settings":
+			_show_settings.call_deferred()
+		elif arg.begins_with("--max-skip="):
+			Preferences.set_max_skip(arg.trim_prefix("--max-skip=").to_int())
+			if _project != null:
+				_project.session.set_max_skip(Preferences.max_skip())
 		elif arg.begins_with("--screenshot="):
 			screenshot_path = arg.trim_prefix("--screenshot=")
 	if not stitch_code.is_empty() and _project != null and _project.pattern.thread_codes.has(stitch_code):

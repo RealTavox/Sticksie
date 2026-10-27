@@ -20,8 +20,11 @@ var row: int
 var cells: PackedInt32Array
 ## +1 to the right, -1 to the left (0 for a single cross).
 var direction: int
-## Cells the thread skips on the back between the previous block of this pass and this one.
-var skip_before := 0
+## Cells the thread skips on the back on its way from the previous step (0 for the first).
+var travel_before := 0
+## Whether a new thread begins with this step: the first step, or the way here skips more cells
+## than the user's limit. Manual thread changes are kept by StitchSession, not here.
+var starts_thread := false
 
 
 func _init(p_kind: Kind, p_thread: int, p_row: int, p_cells: PackedInt32Array, p_direction: int) -> void:
@@ -34,4 +37,4 @@ func _init(p_kind: Kind, p_thread: int, p_row: int, p_cells: PackedInt32Array, p
 
 func _to_string() -> String:
 	var text := "%s row %d %s" % [Kind.keys()[kind], row, cells]
-	return text + (" skip %d" % skip_before if skip_before > 0 else "")
+	return text + (" skip %d" % travel_before if travel_before > 0 else "")

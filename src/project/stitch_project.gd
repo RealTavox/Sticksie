@@ -4,7 +4,9 @@ extends RefCounted
 ## progress. Saved as JSON by ProjectStore; see to_dict() for the format.
 
 ## Save format version. A file with a higher number comes from a newer app and is not loaded.
-const FORMAT := 1
+## 1: first version. 2: adds progress.max_skip and progress.manual_thread_starts (format 1 files
+## get no limit and no manual thread changes).
+const FORMAT := 2
 
 var name: String
 ## Where the project is saved (user://…), empty until it has been saved once.
@@ -47,7 +49,8 @@ func finished_crosses() -> int:
 
 ## The saved form. The pattern is stored as well as the image, so a later change of the thread
 ## palette or the colour matching can't change a pattern that is already being stitched. Progress
-## is stored as finished steps per thread and as cell states; see StitchSession.restore().
+## is stored as finished steps per thread and as cell states (see StitchSession.restore()), plus
+## the skip limit it was planned with and the manual thread changes.
 func to_dict() -> Dictionary:
 	var done := {}
 	for thread in pattern.thread_codes.size():
@@ -68,6 +71,8 @@ func to_dict() -> Dictionary:
 		"progress": {
 			"top_to_bottom": session.top_to_bottom,
 			"start_left": session.start_left,
+			"max_skip": session.max_skip,
+			"manual_thread_starts": session.manual_starts_by_code(),
 			"done_steps": done,
 			"cell_states": Marshalls.raw_to_base64(session.cell_states()),
 		},
@@ -115,6 +120,10 @@ static func from_dict(data: Dictionary) -> StitchProject:
 	project.session = StitchSession.new(pattern)
 	project.session.top_to_bottom = bool(progress.get("top_to_bottom", true))
 	project.session.start_left = bool(progress.get("start_left", true))
+	project.session.max_skip = int(progress.get("max_skip", StitchPlanner.UNLIMITED))
+	var manual_starts: Variant = progress.get("manual_thread_starts", {})
+	if manual_starts is Dictionary:
+		project.session.restore_manual_starts(manual_starts)
 	var saved_done: Dictionary = progress.get("done_steps", {})
 	var done := PackedInt32Array()
 	for code in pattern.thread_codes:

@@ -1,10 +1,12 @@
 class_name StitchPanel
 extends VBoxContainer
-## Guided stitching controls: which thread, what the current step is, progress, back/next.
-## The buttons never take focus, so the space bar always reaches the screen's key handling.
+## Guided stitching controls: which thread, what the current step is, progress, back/next, and
+## starting a new thread by hand. The buttons never take focus, so the space bar always reaches
+## the screen's key handling.
 
 signal next_pressed
 signal previous_pressed
+signal new_thread_toggled
 
 const BUTTON_HEIGHT := 64.0
 const STEP_FONT_SIZE := 24
@@ -17,6 +19,7 @@ var _progress_bar: ProgressBar
 var _progress_label: Label
 var _previous_button: Button
 var _next_button: Button
+var _new_thread_button: Button
 
 
 func _init() -> void:
@@ -55,6 +58,12 @@ func _init() -> void:
 	_next_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_next_button.pressed.connect(next_pressed.emit)
 	buttons.add_child(_next_button)
+	_new_thread_button = _make_button("Neuer Faden ab hier")
+	_new_thread_button.toggle_mode = true
+	_new_thread_button.custom_minimum_size.y = BUTTON_HEIGHT * 0.75
+	_new_thread_button.tooltip_text = "Der Faden ist zu kurz oder verknotet: vor diesem Schritt einen neuen Faden nehmen."
+	_new_thread_button.pressed.connect(new_thread_toggled.emit)
+	add_child(_new_thread_button)
 	var hint := Label.new()
 	hint.text = "Weiter: Knopf, Tippen aufs Muster oder Leertaste"
 	hint.add_theme_font_size_override("font_size", 12)
@@ -63,9 +72,11 @@ func _init() -> void:
 
 
 ## `step` is null when the thread is finished; `position_text` comes from describe_position();
-## `step_index` counts the finished steps.
+## `step_index` counts the finished steps; `thread_start` says whether the step begins with a new
+## thread.
 func show_step(floss: FlossColor, step: StitchStep, position_text: String, step_index: int,
-		step_count: int, crosses_done: int, cross_count: int) -> void:
+		step_count: int, crosses_done: int, cross_count: int,
+		thread_start := StitchSession.ThreadStart.NONE) -> void:
 	_swatch.color = floss.color
 	_thread_label.text = "DMC %s · %s" % [floss.code, floss.name]
 	if step == null:
@@ -80,6 +91,10 @@ func show_step(floss: FlossColor, step: StitchStep, position_text: String, step_
 			mini(step_index + 1, step_count), step_count, crosses_done, cross_count]
 	_previous_button.disabled = step_index == 0
 	_next_button.disabled = step == null
+	# The first step and steps after a too long way start a new thread anyway.
+	_new_thread_button.disabled = step == null or thread_start in [
+			StitchSession.ThreadStart.FIRST, StitchSession.ThreadStart.AUTO]
+	_new_thread_button.set_pressed_no_signal(thread_start != StitchSession.ThreadStart.NONE)
 
 
 static func describe_step(step: StitchStep) -> String:
@@ -92,6 +107,25 @@ static func describe_step(step: StitchStep) -> String:
 			return "Zurück: %d %s nach %s  ( \\ )" % [count, "Gegenstich" if count == 1 else "Gegenstiche", side]
 		_:
 			return "Ein einzelnes ganzes Kreuz  ( X )"
+
+
+## What happens with the thread before the step: a new one (and why), or how far to carry the
+## old one on the back. `max_skip` is the user's skip limit, for the reason of an automatic change.
+static func describe_thread(step: StitchStep, thread_start: StitchSession.ThreadStart,
+		max_skip: int) -> String:
+	const FINISH := "Alten Faden auf der Rückseite unter 3–5 Stichen vernähen, dann neu anfangen."
+	match thread_start:
+		StitchSession.ThreadStart.FIRST:
+			return "Faden einfädeln und auf der Rückseite befestigen (Schlaufe oder unter den ersten Stichen)."
+		StitchSession.ThreadStart.AUTO:
+			return "Neuer Faden: der Weg hierher wären %d Felder, erlaubt sind %d. %s" % [
+					step.travel_before, max_skip, FINISH]
+		StitchSession.ThreadStart.MANUAL:
+			return "Neuer Faden (von dir gewählt). " + FINISH
+	if step.travel_before > 0:
+		return "Faden auf der Rückseite %d %s weiterführen." % [
+				step.travel_before, "Feld" if step.travel_before == 1 else "Felder"]
+	return ""
 
 
 ## Where the step starts: relative to the reference stitch of `hint` (marked in the picture),
@@ -109,9 +143,6 @@ static func describe_position(step: StitchStep, hint: PositionHint, pattern: Pat
 				step.row, "Reihe" if step.row == 1 else "Reihen", pattern.width, pattern.height]
 	else:
 		text = describe_offset(hint.offset(), describe_reference(hint, pattern, states))
-	if step.skip_before > 0:
-		text += "\nAuf der Rückseite %d %s überspringen." % [
-				step.skip_before, "Feld" if step.skip_before == 1 else "Felder"]
 	match step.kind:
 		StitchStep.Kind.HALF:
 			text += "\nNadel unten links im ersten Feld hoch (Punkt)."

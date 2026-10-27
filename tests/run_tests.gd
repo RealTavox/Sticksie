@@ -22,6 +22,10 @@ func _initialize() -> void:
 	_test_project_round_trip()
 	_test_project_rejects_bad_data()
 	_test_project_store()
+	_test_thread_changes()
+	_test_manual_thread_changes()
+	_test_format_1_loads()
+	_test_describe_thread()
 	if _failures == 0:
 		print("All tests passed.")
 	else:
@@ -152,7 +156,7 @@ func _test_planner_rows() -> void:
 	# A gap of 3 is skipped on the back between blocks, a gap of 4 splits the row.
 	got = _describe(StitchPlanner.plan(_pattern(["00...00....0"]), 0))
 	expected = ["HALF row 0 [0, 1]", "HALF row 0 [5, 6] skip 3", "BACK row 0 [6, 5]",
-			"BACK row 0 [1, 0] skip 3", "CROSS row 0 [11]"]
+			"BACK row 0 [1, 0] skip 3", "CROSS row 0 [11] skip 10"]
 	_check(got == expected, "gaps: %s" % [got])
 
 	# Blocks never span a gap; each run of adjacent cells is split on its own.
@@ -437,3 +441,97 @@ func _clear_directory(path: String) -> void:
 		return
 	for file_name in DirAccess.get_files_at(path):
 		DirAccess.remove_absolute(path.path_join(file_name))
+
+
+func _starts(steps: Array[StitchStep]) -> Array[bool]:
+	var result: Array[bool] = []
+	for step in steps:
+		result.append(step.starts_thread)
+	return result
+
+
+func _test_thread_changes() -> void:
+	var pattern := _pattern(["00...00....0", "000........."])
+	var unlimited := StitchPlanner.plan(pattern, 0)
+	_check(_starts(unlimited) == [true, false, false, false, false, false, false],
+			"without a limit only the first step starts a thread: %s" % [_starts(unlimited)])
+	_check(unlimited[4].travel_before == 10 and unlimited[5].travel_before == 10,
+			"long ways are measured: %s" % [_describe(unlimited)])
+
+	# Limit 2: the gap of 3 now splits the row, and every way longer than 2 needs a new thread.
+	var limited := StitchPlanner.plan(pattern, 0, true, true, 2)
+	var got := _describe(limited)
+	var expected := ["HALF row 0 [0, 1]", "BACK row 0 [1, 0]", "HALF row 0 [5, 6] skip 4",
+			"BACK row 0 [6, 5]", "CROSS row 0 [11] skip 5", "HALF row 1 [0, 1, 2] skip 10",
+			"BACK row 1 [2, 1, 0]"]
+	_check(got == expected, "limit 2 splits at gap 3: %s" % [got])
+	_check(_starts(limited) == [true, false, true, false, true, true, false],
+			"limit 2 thread starts: %s" % [_starts(limited)])
+
+	# The next row directly below is no skip.
+	var rows := StitchPlanner.plan(_pattern(["00", "00"]), 0, true, true, 0)
+	_check(_starts(rows) == [true, false, false, false], "next row needs no new thread even at limit 0")
+
+	# Changing the limit keeps what is stitched.
+	var session := StitchSession.new(pattern)
+	for i in 4:
+		session.advance(0)
+	var before := session.cell_states()
+	session.set_max_skip(2)
+	_check(session.cell_states() == before, "stitched cells stay after changing the limit")
+	_check(session.done_count(0) == 4, "progress recounted after changing the limit: %d" % session.done_count(0))
+	_check(session.thread_start(0, 4) == StitchSession.ThreadStart.AUTO, "next step starts a new thread")
+	_check(session.thread_start(0, 0) == StitchSession.ThreadStart.FIRST, "first step is FIRST")
+	_check(session.thread_start(0, 3) == StitchSession.ThreadStart.NONE, "return pass is no start")
+
+
+func _test_manual_thread_changes() -> void:
+	var pattern := _pattern(["0000000000", "0000000000"])
+	var session := StitchSession.new(pattern)
+	session.toggle_manual_start(0)
+	_check(session.thread_start(0, 0) == StitchSession.ThreadStart.FIRST, "first step can't be toggled")
+	session.advance(0)
+	session.advance(0)
+	session.toggle_manual_start(0)
+	_check(session.thread_start(0, 2) == StitchSession.ThreadStart.MANUAL, "manual thread start")
+	session.toggle_manual_start(0)
+	_check(session.thread_start(0, 2) == StitchSession.ThreadStart.NONE, "manual start taken back")
+	session.toggle_manual_start(0)
+
+	# Survives replanning (the step keeps its key) and saving.
+	session.set_max_skip(5)
+	_check(session.thread_start(0, 2) == StitchSession.ThreadStart.MANUAL, "manual start survives replanning")
+	var project := StitchProject.new()
+	project.name = "Test"
+	project.image = Image.create_empty(10, 2, false, Image.FORMAT_RGBA8)
+	project.pattern = pattern
+	project.session = session
+	var loaded := StitchProject.from_dict(JSON.parse_string(JSON.stringify(project.to_dict())))
+	_check(loaded != null and loaded.session.thread_start(0, 2) == StitchSession.ThreadStart.MANUAL,
+			"manual start survives saving")
+	_check(loaded != null and loaded.session.max_skip == 5, "skip limit survives saving")
+
+
+## Files saved before format 2 load with no limit and no manual thread changes.
+func _test_format_1_loads() -> void:
+	var data := _sample_project().to_dict()
+	data.format = 1
+	data.progress.erase("max_skip")
+	data.progress.erase("manual_thread_starts")
+	var loaded := StitchProject.from_dict(data)
+	_check(loaded != null and loaded.session.max_skip == StitchPlanner.UNLIMITED
+			and loaded.session.manual_starts_by_code().is_empty(), "format 1 file loads")
+	_check(loaded != null and loaded.finished_crosses() == _sample_project().finished_crosses(),
+			"format 1 progress kept")
+
+
+func _test_describe_thread() -> void:
+	var step := StitchStep.new(StitchStep.Kind.HALF, 0, 0, PackedInt32Array([5]), 1)
+	step.travel_before = 6
+	var auto := StitchPanel.describe_thread(step, StitchSession.ThreadStart.AUTO, 3)
+	_check(auto.begins_with("Neuer Faden: der Weg hierher wären 6 Felder, erlaubt sind 3."), auto)
+	var carry := StitchPanel.describe_thread(step, StitchSession.ThreadStart.NONE, StitchPlanner.UNLIMITED)
+	_check(carry == "Faden auf der Rückseite 6 Felder weiterführen.", carry)
+	step.travel_before = 0
+	_check(StitchPanel.describe_thread(step, StitchSession.ThreadStart.NONE, 3).is_empty(),
+			"nothing to say for a neighbouring step")

@@ -1,6 +1,7 @@
 class_name StitchSession
 extends RefCounted
-## Progress of stitching one pattern: how many planned steps of each thread are done.
+## Progress of stitching one pattern: how many planned steps of each thread are done, and where
+## the user started a new thread by hand.
 
 enum Cell {
 	NONE,
@@ -10,12 +11,29 @@ enum Cell {
 	FULL,
 }
 
+## Why a step begins with a new thread.
+enum ThreadStart {
+	NONE,
+	## The first step of the colour.
+	FIRST,
+	## The way from the previous step is longer than the skip limit.
+	AUTO,
+	## The user asked for a new thread here.
+	MANUAL,
+}
+
 var pattern: Pattern
 var top_to_bottom := true
 var start_left := true
+## Most cells the thread may skip on the back (StitchPlanner.UNLIMITED: no automatic changes).
+## Change it with set_max_skip(), which replans.
+var max_skip := StitchPlanner.UNLIMITED
 
 var _plans := {}  # thread index -> Array[StitchStep]
 var _done := PackedInt32Array()  # finished steps per thread
+## Manual thread changes per thread index, each as the step's key (see step_key()). Keys instead
+## of step numbers, so they stay at the same stitch when the plan changes.
+var _manual_starts := {}  # thread index -> Array[Vector3i]
 
 
 func _init(p_pattern: Pattern) -> void:
@@ -26,7 +44,7 @@ func _init(p_pattern: Pattern) -> void:
 
 func steps(thread: int) -> Array[StitchStep]:
 	if not _plans.has(thread):
-		_plans[thread] = StitchPlanner.plan(pattern, thread, top_to_bottom, start_left)
+		_plans[thread] = StitchPlanner.plan(pattern, thread, top_to_bottom, start_left, max_skip)
 	return _plans[thread]
 
 
@@ -54,6 +72,74 @@ func last_cell(thread: int) -> Vector2i:
 		return Vector2i(-1, -1)
 	var step := steps(thread)[_done[thread] - 1]
 	return Vector2i(step.cells[-1], step.row)
+
+
+## Changes the skip limit and replans every thread. Finished stitches stay finished: progress
+## is recounted from the stitched cells.
+func set_max_skip(value: int) -> void:
+	if value == max_skip:
+		return
+	var states := cell_states()
+	max_skip = value
+	_plans.clear()
+	restore(_done, states)
+
+
+## Identifies a step by its first cell and kind: (x, y, kind).
+static func step_key(step: StitchStep) -> Vector3i:
+	return Vector3i(step.cells[0], step.row, step.kind)
+
+
+## Whether step `index` of `thread` begins with a new thread, and why.
+func thread_start(thread: int, index: int) -> ThreadStart:
+	var step: StitchStep = steps(thread)[index]
+	if index == 0:
+		return ThreadStart.FIRST
+	if step.starts_thread:
+		return ThreadStart.AUTO
+	if _manual_starts.get(thread, []).has(step_key(step)):
+		return ThreadStart.MANUAL
+	return ThreadStart.NONE
+
+
+## Starts a new thread at the current step of `thread`, or takes that back. Does nothing where a
+## new thread starts anyway (first step, skip limit).
+func toggle_manual_start(thread: int) -> void:
+	var step := current_step(thread)
+	if step == null or thread_start(thread, _done[thread]) in [ThreadStart.FIRST, ThreadStart.AUTO]:
+		return
+	var starts: Array = _manual_starts.get_or_add(thread, [])
+	var key := step_key(step)
+	if starts.has(key):
+		starts.erase(key)
+	else:
+		starts.append(key)
+
+
+## Manual thread changes per thread code, for saving: {code: [[x, y, kind], …]}.
+func manual_starts_by_code() -> Dictionary:
+	var result := {}
+	for thread: int in _manual_starts:
+		var keys := []
+		for key: Vector3i in _manual_starts[thread]:
+			keys.append([key.x, key.y, key.z])
+		if not keys.is_empty():
+			result[pattern.thread_codes[thread]] = keys
+	return result
+
+
+## Restores manual thread changes saved by manual_starts_by_code().
+func restore_manual_starts(by_code: Dictionary) -> void:
+	_manual_starts.clear()
+	for code: String in by_code:
+		var thread := pattern.thread_codes.find(code)
+		if thread < 0:
+			continue
+		var keys: Array[Vector3i] = []
+		for key in by_code[code]:
+			if key is Array and key.size() == 3:
+				keys.append(Vector3i(int(key[0]), int(key[1]), int(key[2])))
+		_manual_starts[thread] = keys
 
 
 func has_progress() -> bool:
