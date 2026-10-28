@@ -24,6 +24,8 @@ const SAMPLE_PATH := "res://samples/hypsi_anhaenger.png"
 ## Images bigger than this on either side are refused (most likely a photo, not pixel art).
 const MAX_SIDE := 500
 const BUTTON_HEIGHT := 48.0
+## Length of the needle on the stitch button of each colour.
+const NEEDLE_ICON_PX := 96
 ## Rows of left-out colours are faded to this.
 const LEFT_OUT_ALPHA := 0.35
 ## Smallest cell size when stitching starts, so the current block is easy to see.
@@ -980,9 +982,12 @@ func _make_color_row(floss: FlossColor, count: int) -> Control:
 	fabric_box.toggled.connect(_on_fabric_toggled.bind(floss.code))
 	row.add_child(fabric_box)
 	var stitch_button := Button.new()
-	stitch_button.icon = ButtonIcons.button_icon(ButtonIcons.Icon.STITCH, 40)
+	# Drawn at three times the size it shows, scaled down smoothly, so it stays sharp on dense screens.
+	stitch_button.icon = ButtonIcons.needle_icon(NEEDLE_ICON_PX * 3)
+	stitch_button.add_theme_constant_override("icon_max_width", NEEDLE_ICON_PX)
+	stitch_button.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
 	stitch_button.tooltip_text = "Diese Farbe sticken"
-	stitch_button.custom_minimum_size = Vector2(56, 40)
+	stitch_button.custom_minimum_size = Vector2(NEEDLE_ICON_PX + 20, 40)
 	stitch_button.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	stitch_button.focus_mode = Control.FOCUS_NONE
 	stitch_button.disabled = thread < 0

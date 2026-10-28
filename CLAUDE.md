@@ -54,8 +54,8 @@ item is resolved during normal work, delete its entry in the same change.
   texts bottom right; all inside the display's safe area; `_set_overlay()` slides and fades
   them in and out (panels stacked in the dock move along as one), then the view glides the
   current step clear of them; the overview opens the
-  colour list and info by itself), `SkeinSwatch` a thread colour drawn as a skein with a band in
-  the pure colour (colour list rows; "Auslassen" fades the whole row),
+  colour list and info by itself), `SkeinSwatch` a thread colour drawn as a square of the pure
+  colour with a loop of thread coming out of it (colour list rows; "Auslassen" fades the whole row),
   `tests/run_tests.gd`, plus `project.godot` and the `*.import` files next to resources (they
   hold import settings: `data/threads/dmc-floss.csv` uses the "keep" importer so it isn't
   turned into a translation, `samples/*.png` use the "image" importer so `load()` returns an

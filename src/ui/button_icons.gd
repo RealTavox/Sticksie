@@ -4,7 +4,7 @@ class_name ButtonIcons
 ## units of the button's disc: (0, 0) is its centre, 1 its rim, y points down. Each mask is
 ## made once and cached.
 
-enum Icon { MENU, TEXT, NEEDLE, SPOOL, PIN, STITCH }
+enum Icon { MENU, TEXT, NEEDLE, SPOOL, PIN }
 
 const SIZE := 128
 
@@ -19,18 +19,71 @@ static func texture(icon: Icon, disc: float) -> ImageTexture:
 	return _cache[key]
 
 
-## `icon` as a white symbol on transparent ground, `size` pixels square, for an ordinary Button.
-static func button_icon(icon: Icon, size: int) -> ImageTexture:
-	var key := "button/%d/%d" % [icon, size]
-	if not _cache.has(key):
-		var image := Image.create_empty(size, size, false, Image.FORMAT_RGBA8)
-		var pixel := 2.0 / size
-		for y in size:
-			for x in size:
-				var p := Vector2(x + 0.5, y + 0.5) / size * 2.0 - Vector2.ONE
-				image.set_pixel(x, y, Color(1, 1, 1, clampf(0.5 - distance(icon, p) / pixel, 0.0, 1.0)))
-		_cache[key] = ImageTexture.create_from_image(image)
+## The needle for the "stitch this colour" button, lying flat with the point to the right, `width`
+## pixels long. Its outline follows the user's drawing (Input des Users/Needel.svg, coordinates
+## below in its units): a round head with a long eye, a shaft tapering towards a blunt
+## elliptical point, in the drawing's ratio of about 18 : 1. Shaded as polished steel under the
+## default test light, the eye see-through.
+static func needle_icon(width: int) -> ImageTexture:
+	var key := "needle/%d" % width
+	if _cache.has(key):
+		return _cache[key]
+	const LEFT := 70.0
+	const RIGHT := 523.4
+	const TOP := 202.9
+	const BOTTOM := 228.2
+	var scale := width / (RIGHT - LEFT)
+	var height := ceili((BOTTOM - TOP) * scale) + 2
+	var image := Image.create_empty(width, height, false, Image.FORMAT_RGBA8)
+	var light := Vector3(-0.54, -0.54, 0.64).normalized()
+	var steel := Color("#a9a9a9")
+	for y in height:
+		for x in width:
+			var p := Vector2(LEFT + (x + 0.5) / scale, TOP + (y - 0.5) / scale)
+			var coverage := clampf(0.5 - _needle_distance(p) * scale, 0.0, 1.0)
+			if coverage <= 0.0:
+				image.set_pixel(x, y, Color(0, 0, 0, 0))
+				continue
+			# Round across: the normal tilts up or down with the height inside the outline.
+			var v := clampf((p.y - NEEDLE_AXIS) / _needle_half_height(p.x), -1.0, 1.0)
+			var normal := Vector3(0.0, v, sqrt(1.0 - v * v))
+			var diffuse := maxf(normal.dot(light), 0.0)
+			var specular := pow(maxf(normal.dot((light + Vector3(0, 0, 1)).normalized()), 0.0), 30.0) * 0.6
+			var shade := steel * (0.45 + 0.75 * diffuse) + Color(specular, specular, specular)
+			image.set_pixel(x, y, Color(shade, coverage))
+	image.generate_mipmaps()
+	_cache[key] = ImageTexture.create_from_image(image)
 	return _cache[key]
+
+
+## The needle's middle line and its parts, in the drawing's units.
+const NEEDLE_AXIS := 215.5
+const NEEDLE_HEAD := Vector2(82.63, 215.54)
+const NEEDLE_HEAD_RADIUS := 12.59
+const NEEDLE_POINT := Vector2(501.8, 215.5)
+const NEEDLE_POINT_RADII := Vector2(21.6, 6.75)
+const NEEDLE_EYE_FROM := Vector2(84.69, 215.34)
+const NEEDLE_EYE_TO := Vector2(123.85, 215.34)
+const NEEDLE_EYE_RADIUS := 5.4
+
+
+static func _needle_distance(p: Vector2) -> float:
+	var shaft := _tapered(p, NEEDLE_HEAD, NEEDLE_POINT, NEEDLE_HEAD_RADIUS, NEEDLE_POINT_RADII.y)
+	var q := (p - NEEDLE_POINT) / NEEDLE_POINT_RADII
+	var point := (q.length() - 1.0) * NEEDLE_POINT_RADII.y
+	var eye := _capsule(p, NEEDLE_EYE_FROM, NEEDLE_EYE_TO, NEEDLE_EYE_RADIUS)
+	return maxf(minf(shaft, point), -eye)
+
+
+## Half the needle's thickness at `x`: round head, straight taper, elliptical point.
+static func _needle_half_height(x: float) -> float:
+	if x < NEEDLE_HEAD.x:
+		return sqrt(maxf(NEEDLE_HEAD_RADIUS ** 2 - (x - NEEDLE_HEAD.x) ** 2, 0.25))
+	if x < NEEDLE_POINT.x:
+		return lerpf(NEEDLE_HEAD_RADIUS, NEEDLE_POINT_RADII.y,
+				(x - NEEDLE_HEAD.x) / (NEEDLE_POINT.x - NEEDLE_HEAD.x))
+	var t := (x - NEEDLE_POINT.x) / NEEDLE_POINT_RADII.x
+	return maxf(NEEDLE_POINT_RADII.y * sqrt(maxf(1.0 - t * t, 0.0)), 0.5)
 
 
 static func _render(icon: Icon, disc: float) -> ImageTexture:
@@ -84,13 +137,6 @@ static func distance(icon: Icon, p: Vector2) -> float:
 			d = minf(d, _box(q, Vector2(0.0, -0.14), Vector2(0.1, 0.2), 0.03))
 			d = minf(d, _capsule(q, Vector2(-0.24, 0.07), Vector2(0.24, 0.07), 0.06))
 			return minf(d, _tapered(q, Vector2(0.0, 0.5), Vector2(0.0, 0.07), 0.01, 0.035))
-		Icon.STITCH:
-			# A needle lying flat, pointing right, the thread trailing from its eye: "stitch this".
-			var tip := Vector2(0.9, 0.0)
-			var top := Vector2(-0.55, 0.0)
-			var d := _tapered(p, tip, top, 0.03, 0.17)
-			var eye := maxf(d, -_capsule(p, top.lerp(tip, 0.06), top.lerp(tip, 0.2), 0.06))
-			return minf(eye, _bezier(p, top.lerp(tip, 0.13), Vector2(-1.0, -0.15), Vector2(-0.85, 0.75), 0.08))
 	return INF
 
 
