@@ -39,6 +39,7 @@ func _initialize() -> void:
 	_test_format_2_loads()
 	_test_picker_order()
 	_test_leg_progress()
+	_test_light_orbit()
 	# The root joins the tree only once the main loop runs; gestures need it for their timers.
 	await process_frame
 	_test_gestures()
@@ -918,6 +919,23 @@ func _test_format_2_loads() -> void:
 
 
 ## The colour picker: greys first, then hues; every row from light to dark.
+func _test_light_orbit() -> void:
+	var start := StitchScene.orbit(315.0, 55.0, 0.0)
+	_check(absf(start.x - 315.0) < 0.01 and absf(start.y - 55.0) < 0.01, "orbit starts at the light: %s" % start)
+	var lowest := 90.0
+	var highest := 0.0
+	var from_bottom_right := false
+	for turn in range(0, 361, 5):
+		var light := StitchScene.orbit(315.0, 55.0, turn)
+		lowest = minf(lowest, light.y)
+		highest = maxf(highest, light.y)
+		# Low from the bottom right (azimuth 90..180) would light the stitches from the wrong side.
+		from_bottom_right = from_bottom_right or (light.x > 100.0 and light.x < 170.0 and light.y < 70.0)
+	_check(highest - lowest > 20.0, "the light rises and sinks on its way: %s..%s" % [lowest, highest])
+	_check(lowest >= 54.9, "never lower than where it starts: %s" % lowest)
+	_check(not from_bottom_right, "never low from the bottom right")
+
+
 func _test_leg_progress() -> void:
 	var pattern := _pattern(["00", "1."])
 	var session := StitchSession.new(pattern)

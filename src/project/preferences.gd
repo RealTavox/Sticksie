@@ -2,6 +2,9 @@ class_name Preferences
 ## App-wide user preferences (DESIGN.md "Einstellungen"), kept in settings.cfg next to the
 ## project files, so test runs with another ProjectStore.directory don't touch them.
 
+const DEFAULT_LIGHT_AZIMUTH := 315.0
+const DEFAULT_LIGHT_ELEVATION := 55.0
+
 
 ## Most cells the thread may skip on the back before the app asks for a new thread;
 ## StitchPlanner.UNLIMITED (the default) means never.
@@ -84,6 +87,21 @@ static func set_stitch_style(fixed: bool, p_slash_first: bool, from_top: bool) -
 	_store("needle_fixed", fixed)
 	_store("slash_first", p_slash_first)
 	_store("needle_from_top", from_top)
+
+
+## Where the light on fabric and thread comes from: degrees clockwise from the top of the
+## screen (default from the top left) and degrees above the fabric (default fairly high).
+static func light_azimuth() -> float:
+	return float(_load().get_value("view", "light_azimuth", DEFAULT_LIGHT_AZIMUTH))
+
+
+static func light_elevation() -> float:
+	return float(_load().get_value("view", "light_elevation", DEFAULT_LIGHT_ELEVATION))
+
+
+static func set_light(azimuth: float, elevation: float) -> void:
+	_store("light_azimuth", azimuth, "view")
+	_store("light_elevation", elevation, "view")
 
 
 ## Whether the screen is laid out for touch (a full-screen view with round buttons that open

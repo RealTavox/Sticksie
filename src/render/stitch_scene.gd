@@ -10,6 +10,10 @@ extends Node3D
 ## thread.gdshader; their soft shadows reuse the same MultiMeshes with thread_shadow.gdshader.
 ## Blending follows instance order, so every first leg comes before every second leg.
 
+## The reward orbit of the light (orbit()), seen from above in units of the light's own distance
+## from overhead: the oval's centre lies this far towards the light, and it is this wide across.
+const ORBIT_CENTER := 0.55
+const ORBIT_WIDTH := 0.6
 const THREAD_WIDTH := StitchTextures.THREAD_WIDTH
 ## Height of the legs and back stitches above the fabric, in cells.
 const FIRST_LIFT := 0.03
@@ -209,6 +213,22 @@ func set_turn(back: bool, angle: float, pivot: float, view_width: float) -> void
 
 ## Light from `azimuth` degrees (clockwise from the top of the screen) at `elevation` degrees
 ## above the fabric.
+## The light `turn` degrees along its reward orbit from (`azimuth`, `elevation`), as
+## Vector2(azimuth, elevation). Seen from above, the light's direction runs round an oval that
+## starts at the given light and is shifted towards it: on the far side the light stands almost
+## overhead instead of coming from the opposite corner, and on the way round it rises and sinks
+## again. A turn of 0 or 360 is the given light.
+static func orbit(azimuth: float, elevation: float, turn: float) -> Vector2:
+	var a := deg_to_rad(azimuth)
+	var flat := cos(deg_to_rad(elevation))
+	var toward := Vector2(sin(a), -cos(a))
+	var t := deg_to_rad(turn)
+	var p := toward * flat * (ORBIT_CENTER + (1.0 - ORBIT_CENTER) * cos(t)) \
+			+ toward.orthogonal() * flat * ORBIT_WIDTH * sin(t)
+	var new_azimuth := fposmod(rad_to_deg(atan2(p.x, -p.y)), 360.0) if p.length() > 0.0001 else azimuth
+	return Vector2(new_azimuth, rad_to_deg(acos(clampf(p.length(), 0.0, 1.0))))
+
+
 func set_light(azimuth: float, elevation: float) -> void:
 	var a := deg_to_rad(azimuth)
 	var e := deg_to_rad(clampf(elevation, 1.0, 90.0))

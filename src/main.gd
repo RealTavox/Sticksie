@@ -36,11 +36,8 @@ const LEFT_OUT_ALPHA := 0.35
 const PROGRESS_HEIGHT := 16.0
 ## Smallest cell size when stitching starts, so the current block is easy to see.
 const STITCH_CELL_PX := 24.0
-## Starting light for the test sliders: from the top left, 40° above the fabric.
-const LIGHT_AZIMUTH := 315.0
-const LIGHT_ELEVATION := 40.0
-## After each step the light swings once around the fabric, as a little reward; during a
-## celebration it keeps going round.
+## After each step the light swings once around the fabric on an oval (StitchScene.orbit()), as
+## a little reward; during a celebration it keeps going round.
 const LIGHT_SPIN_SECONDS := 0.9
 const LIGHT_LOOP_SECONDS := 2.4
 ## Start corners in the settings: label and (top_to_bottom, start_left, auto).
@@ -118,6 +115,8 @@ var _sample_button: Button
 var _projects_button: Button
 var _project_browser: ProjectBrowser
 var _settings_dialog: AcceptDialog
+## Holds the settings, scrolling when they are taller than the screen allows.
+var _settings_scroll: ScrollContainer
 var _limit_box: CheckBox
 var _corner_option: OptionButton
 var _limit_spin: SpinBox
@@ -133,7 +132,6 @@ var _overview_button: Button
 var _side_button: Button
 var _info_label: Label
 var _toolbar: HFlowContainer
-var _light_row: HBoxContainer
 var _desktop_root: MarginContainer
 var _desktop_column: VBoxContainer
 var _body: BoxContainer
@@ -230,7 +228,6 @@ func _build_ui() -> void:
 	_info_label.text = "Öffne ein Pixelart-Bild (PNG). Ein Pixel wird ein Kreuzstich."
 	_info_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_info_label.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	_light_row = _make_light_row()
 
 	_view = PatternView.new()
 	_view.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -478,7 +475,6 @@ func _apply_ui_mode() -> void:
 		_place(_view, _touch_root, 0)
 		_view.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 		_place(_toolbar, _menu_content, 0)
-		_place(_light_row, _menu_content, 1)
 		_place(_info_label, _text_content, 0)
 		_place(_stitch_panel.info, _text_content, 1)
 		_place(_list_host, _list_content, 0)
@@ -490,7 +486,6 @@ func _apply_ui_mode() -> void:
 	else:
 		_place(_toolbar, _desktop_column, 0)
 		_place(_info_label, _toolbar)
-		_place(_light_row, _desktop_column, 1)
 		_place(_view, _body, 0)
 		_place(_list_host, _body, 1)
 		_place(_stitch_panel.info, _stitch_panel, 0)
@@ -533,19 +528,19 @@ func _update_visibility() -> void:
 		_text_button.tooltip = "Projektinfo ein- und ausblenden"
 
 
-## Test controls for the light on fabric and thread (direction and height above the fabric), to
-## judge the normal maps; to be removed once the look is settled.
+## The light on fabric and thread in the advanced settings: where it comes from and how high
+## above the fabric. Moving a slider shows it right away; Abbrechen puts the saved light back.
 func _make_light_row() -> HBoxContainer:
 	var row := HBoxContainer.new()
 	var label := Label.new()
-	label.text = "Licht (Test):"
+	label.text = "Licht von:"
 	row.add_child(label)
-	_light_azimuth = _make_light_slider(0.0, 360.0, LIGHT_AZIMUTH)
+	_light_azimuth = _make_light_slider(0.0, 360.0, Preferences.light_azimuth())
 	row.add_child(_light_azimuth)
 	var height_label := Label.new()
-	height_label.text = "Höhe"
+	height_label.text = "Höhe:"
 	row.add_child(height_label)
-	_light_elevation = _make_light_slider(5.0, 90.0, LIGHT_ELEVATION)
+	_light_elevation = _make_light_slider(5.0, 90.0, Preferences.light_elevation())
 	row.add_child(_light_elevation)
 	return row
 
@@ -562,10 +557,17 @@ func _make_light_slider(from: float, to: float, value: float) -> HSlider:
 
 
 func _apply_light() -> void:
-	var azimuth := fposmod(_light_azimuth.value + _light_spin, 360.0)
-	_view.set_light(azimuth, _light_elevation.value)
+	var light := StitchScene.orbit(_light_azimuth.value, _light_elevation.value, _light_spin)
+	_view.set_light(light.x, light.y)
 	for button: RoundButton in [_menu_button, _list_button, _text_button, _menu_pin]:
-		button.set_light(azimuth, _light_elevation.value)
+		button.set_light(light.x, light.y)
+
+
+## The light as saved, on the sliders and on screen (after Abbrechen or `--light`).
+func _restore_light() -> void:
+	_light_azimuth.set_value_no_signal(Preferences.light_azimuth())
+	_light_elevation.set_value_no_signal(Preferences.light_elevation())
+	_apply_light()
 
 
 ## Swings the light once around the fabric (unless it is going round anyway).
@@ -604,9 +606,14 @@ func _build_settings_dialog() -> void:
 	_settings_dialog.ok_button_text = "Übernehmen"
 	_settings_dialog.add_cancel_button("Abbrechen")
 	_settings_dialog.confirmed.connect(_apply_settings)
+	_settings_dialog.canceled.connect(_restore_light)
 	add_child(_settings_dialog)
+	_settings_scroll = ScrollContainer.new()
+	_settings_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	_settings_dialog.add_child(_settings_scroll)
 	var content := VBoxContainer.new()
-	_settings_dialog.add_child(content)
+	content.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_settings_scroll.add_child(content)
 	var ui_label := Label.new()
 	ui_label.text = "Bedienung:"
 	content.add_child(ui_label)
@@ -701,6 +708,13 @@ func _build_advanced_settings(content: VBoxContainer) -> void:
 			+ "oberen Schenkel nicht mehr gleich.")
 	note.modulate.a = 0.7
 	_advanced_box.add_child(note)
+	_advanced_box.add_child(HSeparator.new())
+	_advanced_box.add_child(_make_light_row())
+	var light_note := Label.new()
+	light_note.text = ("Richtung im Uhrzeigersinn von oben (315 = oben links) und Höhe über dem Stoff\n"
+			+ "(90 = genau von oben). Nach jedem Schritt kreist das Licht einmal auf einem Oval.")
+	light_note.modulate.a = 0.7
+	_advanced_box.add_child(light_note)
 	_show_advanced(false)
 
 
@@ -708,7 +722,18 @@ func _show_advanced(open: bool) -> void:
 	_advanced_button.set_pressed_no_signal(open)
 	_advanced_button.text = ("▾ " if open else "▸ ") + "Erweitert"
 	_advanced_box.visible = open
+	_fit_settings()
+
+
+## Sizes the settings to their content, at most as tall as fits on screen (they scroll then).
+func _fit_settings() -> void:
+	var content: Control = _settings_scroll.get_child(0)
+	var wanted := content.get_combined_minimum_size()
+	var room := get_viewport_rect().size.y - 140.0
+	_settings_scroll.custom_minimum_size = Vector2(wanted.x, minf(wanted.y, room))
 	_settings_dialog.reset_size()
+	if _settings_dialog.visible:
+		_settings_dialog.move_to_center()
 
 
 ## Leg order and needle start only count for a fixed style.
@@ -905,6 +930,7 @@ func _show_settings() -> void:
 	_leg_option.selected = 0 if Preferences.slash_first() else 1
 	_needle_start_option.selected = 1 if Preferences.needle_from_top() else 0
 	_update_needle_options()
+	_fit_settings()
 	_settings_dialog.popup_centered()
 
 
@@ -917,6 +943,7 @@ static func _corner_index(top_to_bottom: bool, start_left: bool, auto: bool) -> 
 
 ## Stores the preferences and replans the open project; stitched cells stay stitched.
 func _apply_settings() -> void:
+	Preferences.set_light(_light_azimuth.value, _light_elevation.value)
 	if (_ui_option.selected == 0) != Preferences.touch_mode():
 		Preferences.set_touch_mode(_ui_option.selected == 0)
 		_apply_ui_mode()
@@ -1513,9 +1540,9 @@ func _handle_cmdline() -> void:
 			flip = arg.trim_prefix("--flip=").to_float()
 		elif arg.begins_with("--light="):
 			var light := arg.trim_prefix("--light=").split(",")
-			_light_azimuth.value = light[0].to_float()
-			if light.size() > 1:
-				_light_elevation.value = light[1].to_float()
+			Preferences.set_light(light[0].to_float(),
+					light[1].to_float() if light.size() > 1 else Preferences.light_elevation())
+			_restore_light()
 		elif arg == "--projects":
 			_show_projects.call_deferred()
 		elif arg.begins_with("--max-skip="):

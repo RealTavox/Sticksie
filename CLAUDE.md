@@ -20,7 +20,8 @@ item is resolved during normal work, delete its entry in the same change.
 
 - Project code: `src/` (`project/` saving: `StitchProject` and its JSON format, `ProjectStore`
   files in `user://projects/` (list with preview picture, rename, delete) and the last opened project, `Preferences` app-wide settings in
-  `settings.cfg` next to the projects (skip limit, start corner or automatic, stitch method, block size, the advanced
+  `settings.cfg` next to the projects (light direction and height in section `view`, default from the top left at 55°, set in the
+  advanced settings; skip limit, start corner or automatic, stitch method, block size, the advanced
   stitch style; not saved in the project file, pushed into the open project; plus the touch or
   desktop layout in section `ui`, default touch on mobile); `palette/` thread colours and Lab matching, `pattern/` the `Pattern`
   resource, `import/` PNG → pattern, `planner/` Danish stitch order (`StitchPlanner` →
@@ -53,7 +54,7 @@ item is resolved during normal work, delete its entry in the same change.
   from the left edge = overview; `set_covered()` keeps steps clear of overlays), `StitchPanel`
   step guidance (texts in `info`, buttons in `controls`, so the touch layout can split them),
   `RoundButton` the round see-through touch buttons (lit by `round_button.gdshader` from the
-  test light, `tint_color` when on: the block colour while stitching, blue in the overview, symbols from `ButtonIcons` distance functions, tooltip on long press), `ProjectBrowser` the
+  same light as the fabric, `tint_color` when on: the block colour while stitching, blue in the overview, symbols from `ButtonIcons` distance functions, tooltip on long press), `ProjectBrowser` the
   project list: open, rename, delete after a confirmation; the preview comes from
   `ProjectStore.preview()`, for now the source image, later meant to show the progress), `main.tscn`/`main.gd` the start screen: two layouts
   built from the same widgets, moved by `_apply_ui_mode()`: desktop (toolbar, side panel) and
@@ -74,8 +75,10 @@ item is resolved during normal work, delete its entry in the same change.
   was the last colour, `Finale` follows: flash and screen shake, darkness around the pattern
   with turning golden rays (`finale.gdshader`), "MEISTERWERK!" letter by letter, fireworks,
   confetti, a count-up and a rainbow bar, then buttons: overview, new project (file dialog),
-  open project (project list)); after every step the test light swings once around
-  (`main.gd` `_spin_light()`), during both shows it keeps turning (`_loop_light()`),
+  open project (project list)); after every step the light swings once around on an oval
+  (`StitchScene.orbit()`: shifted towards the light, so it rises towards overhead on the far side
+  and never comes low from the opposite corner; `main.gd` `_spin_light()`), during both shows it
+  keeps turning (`_loop_light()`),
   `SkeinSwatch` a thread colour drawn as a square of the pure
   colour with a loop of thread coming out of it (one colourless template image per shape,
   tinted by `skein.gdshader`, so it fades as one; tapping it opens the colour picker),
@@ -123,7 +126,7 @@ How to check a change; every fix and feature runs these. Godot binary:
    for a colour of the list, `--picker-view=<list,project>` its list view and/or project filter, `--pick=<code>` chooses a colour in it, `--tooltip=<menu|list|text>` shows a
    round button's tooltip, `--safe-area=<l>,<t>,<r>,<b>` fakes a notch or island (canvas px), `--finish` stitches the rest of the `--stitch` colour (the celebration comes in), `--dismiss` taps it away to the overview, `--finale` shows the finished-project show, `--wait=<seconds>` waits that long before the screenshot (e.g. into the bar's fill; otherwise screenshots wait for the fill), `--zoom=<cell px>`
    to zoom in on the current step, `--light=<azimuth>,<elevation>` (degrees; azimuth clockwise
-   from the top) for the test light, `--flip=<0..1>` with `--back` to hold the flip animation
+   from the top) for the light (saved like the settings), `--flip=<0..1>` with `--back` to hold the flip animation
    at that point. Screenshots wait for a running flip to end. In zsh, pass each user
    argument as its own word (an unsplit `"$args"` arrives as one argument and is ignored).
 
