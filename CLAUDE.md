@@ -67,7 +67,8 @@ item is resolved during normal work, delete its entry in the same change.
   between the bottom round buttons (desktop: under everything): grey capsule track, capsule fill
   in the block colour (blue in the overview), progress counted in legs
   (`StitchSession.leg_progress()`, a half stitch is one of two); going up it flashes the new
-  part white, pops and fills after it with bands of light (`progress_strip.gdshader`),
+  part white, pops and fills after it with long bands of light, at most two at a time, winding
+  round the bar as if it were a solid tube (`progress_strip.gdshader`),
   `Celebration` the full-screen show when a colour is finished (dimmed screen, the bar flies to
   the middle and glows, CPUParticles2D confetti and sparkles, congratulation; a tap goes to the
   overview, whose bar then fills from where the project was when stitching began, and the colour

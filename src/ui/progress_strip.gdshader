@@ -16,6 +16,13 @@ uniform float glow : hint_range(0.0, 2.0) = 0.0;
 uniform vec4 fill_color : source_color = vec4(0.17, 0.47, 0.88, 1.0);
 uniform vec4 track_color : source_color = vec4(0.42, 0.42, 0.42, 0.8);
 
+// The bands of light: how far they lean as they wind round the tube (in bar radii per quarter
+// turn), how fast they run (bar heights per second) and how long each is (share of the distance
+// from one band to the next, either side of its middle).
+const float BAND_TWIST = 1.4;
+const float BAND_SPEED = 9.0;
+const float BAND_LENGTH = 0.2;
+
 // Distance to a capsule from x = a to x = b (centres of its round ends) of radius r, at height 0.
 float capsule(vec2 p, float a, float b, float r) {
 	float x = clamp(p.x, a, max(a, b));
@@ -42,10 +49,22 @@ void fragment() {
 	// Rounded like a tube: lighter on top, darker at the bottom.
 	float height = clamp(q.y / r, -1.0, 1.0);
 	vec3 tube = fill_color.rgb * (1.05 - 0.3 * height) + vec3(0.18) * pow(max(-height, 0.0), 3.0);
-	// Bands of light running to the right, slanted a little.
-	float band = sin((p.x - p.y * 0.6) / bar.y * 1.7 - phase * 9.0);
-	float wave = pow(max(band, 0.0), 6.0) * shimmer;
-	tube += vec3(wave * 0.9);
+	// Bands of light running to the right, painted on the surface of the capsule as if it were
+	// a solid tube: `n` is the surface normal (x along the bar, y up/down, z towards the viewer).
+	// The bands wind round it like a screw thread, so they bend where the surface turns away
+	// (top, bottom and the round ends) and fade there.
+	vec2 axis = vec2(clamp(q.x, left, max(left, fill_end)), 0.0);
+	vec2 n2 = clamp((q - axis) / r, vec2(-1.0), vec2(1.0));
+	float nz = sqrt(max(1.0 - dot(n2, n2), 0.0));
+	float around = axis.x + asin(n2.x) * r - asin(n2.y) * r * BAND_TWIST;
+	// At most two bands on the bar at a time, each several bar heights long.
+	float period = max(bar.x * 0.55, bar.y * 8.0);
+	float travel = fract((around - phase * bar.y * BAND_SPEED) / period);
+	float off_centre = abs(travel - 0.5) * period;
+	float band = 1.0 - smoothstep(0.0, period * BAND_LENGTH, off_centre);
+	float glint = pow(band, 6.0);
+	float wave = (band * band * 0.55 + glint * 0.6) * (0.25 + 0.75 * nz) * (1.0 - 0.35 * n2.y) * shimmer;
+	tube += vec3(wave);
 	vec3 rgb = mix(mix(track_color.rgb, vec3(1.0), ghosted), tube, filled);
 	float alpha = max(track * track_color.a, max(filled, ghosted));
 
