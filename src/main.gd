@@ -131,6 +131,12 @@ var _dev_tools_box: VBoxContainer
 var _dev_mode_box: CheckBox
 ## Shown under the menu button in developer mode; a toggle without a job yet.
 var _dev_button: RoundButton
+## The symbol window at the bottom of the stitching screen, its switch in the advanced settings,
+## and whether it has been put in place since it last appeared (then it glides when it moves).
+var _symbols: StepSymbols
+var _symbols_box: CheckBox
+var _symbols_placed := false
+var _symbols_tween: Tween
 var _needle_option: OptionButton
 var _leg_option: OptionButton
 var _needle_start_option: OptionButton
@@ -296,6 +302,13 @@ func _build_ui() -> void:
 	_stitch_panel.new_thread_toggled.connect(_toggle_new_thread)
 	_build_desktop_shell()
 	_build_touch_shell()
+	# Above the pattern and the touch panels, below the windows.
+	_symbols = StepSymbols.new()
+	_symbols.visible = false
+	add_child(_symbols)
+	_view.resized.connect(func() -> void:
+		if not _touch:
+			_place_symbols.call_deferred(0.0))
 	_build_settings_dialog()
 	_project_browser = ProjectBrowser.new()
 	_project_browser.open_requested.connect(_open_project)
@@ -554,6 +567,7 @@ static func _place(node: Node, parent: Node, index := -1) -> void:
 ## Shows the widgets for the overview or for stitching, in the current layout.
 func _update_visibility() -> void:
 	var stitching := _stitch_thread >= 0
+	_update_symbols()
 	_open_button.visible = not stitching
 	_projects_button.visible = not stitching
 	_overview_button.visible = stitching
@@ -721,7 +735,8 @@ func _build_settings_dialog() -> void:
 	_build_advanced_settings(content)
 
 
-## The advanced part, closed at first so the window stays short: how each cross is worked.
+## The advanced part, closed at first so the window stays short: how each cross is worked, and the
+## symbol window.
 func _build_advanced_settings(content: VBoxContainer) -> void:
 	_advanced_button = _make_section_button(_show_advanced)
 	content.add_child(_advanced_button)
@@ -735,11 +750,16 @@ func _build_advanced_settings(content: VBoxContainer) -> void:
 	_advanced_box.add_child(_leg_option)
 	_needle_start_option = _make_option(NEEDLE_STARTS)
 	_advanced_box.add_child(_needle_start_option)
+	_symbols_box = CheckBox.new()
+	_symbols_box.text = "Symbolfenster beim Sticken (Zählen, Stich, Einfädeln, Vernähen)"
+	_symbols_box.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_advanced_box.add_child(_make_note("Automatisch: erst /, dann \\. Die Nadel kommt immer so hoch, dass auf der "
 			+ "Rückseite nur kurze senkrechte Stiche bleiben, in beide Richtungen. "
 			+ "Fest: jeder Schenkel genau so, wie gewählt. Auf der Rückseite kann der Faden dann "
 			+ "schräg über zwei Felder laufen. Nicht mitten im Projekt wechseln, sonst liegen die "
 			+ "oberen Schenkel nicht mehr gleich."))
+	_advanced_box.add_child(HSeparator.new())
+	_advanced_box.add_child(_symbols_box)
 	_show_advanced(false)
 	var light_row := _make_light_row()
 	if OS.is_debug_build():
@@ -840,7 +860,8 @@ func _update_layout() -> void:
 	if _touch:
 		_layout_touch()
 		return
-	_view.set_covered(0.0, 0.0)
+	_view.set_covered(0.0, _symbols_room())
+	_place_symbols.call_deferred(0.0)
 	# Portrait: pattern above the side panel; landscape: side panel on the right.
 	var portrait := size.y > size.x
 	_body.vertical = portrait
@@ -917,9 +938,48 @@ func _update_cover() -> void:
 	var bottom := size.y - _list_button.position.y
 	if _list_panel.visible or _text_panel.visible:
 		bottom = size.y - _dock.get_rect().position.y
-	_view.set_covered(top, bottom)
+	_view.set_covered(top, bottom + _symbols_room())
+	_place_symbols(bottom)
 	if _stitch_thread >= 0 and _shown_step != null:
 		_view.ensure_visible(_shown_step, _shown_hint, _shown_thread_end, true)
+
+
+## Shows the symbol window while stitching (if switched on and it has something to show) and
+## makes room for it.
+func _update_symbols() -> void:
+	var show := _stitch_thread >= 0 and Preferences.step_symbols() and _symbols.has_cards()
+	if show == _symbols.visible:
+		return
+	_symbols.visible = show
+	_symbols_placed = false
+	if _touch:
+		_update_cover()
+	else:
+		_update_layout()
+
+
+## Height the symbol window takes from the bottom of the pattern, with its gap.
+func _symbols_room() -> float:
+	return StepSymbols.SIDE + TOUCH_MARGIN if _symbols.visible else 0.0
+
+
+## Puts the symbol window in the middle at the bottom of the pattern, `bottom` above its lower edge
+## (the round buttons and open panels in the touch layout); it glides there when it moves.
+func _place_symbols(bottom: float) -> void:
+	if not _symbols.visible:
+		return
+	var view := _view.get_global_rect()
+	var target := Vector2(view.get_center().x - StepSymbols.SIDE / 2.0,
+			view.end.y - bottom - StepSymbols.SIDE - TOUCH_MARGIN).round()
+	if _symbols_tween != null:
+		_symbols_tween.kill()
+	if not _symbols_placed:
+		_symbols.position = target
+		_symbols_placed = true
+	elif _symbols.position != target:
+		_symbols_tween = create_tween()
+		_symbols_tween.tween_property(_symbols, "position", target, DOCK_OPEN_SECONDS).set_trans(
+				Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
 
 
 ## Any touch on the view closes the menu unless it is pinned; the tap that closed it does
@@ -1034,6 +1094,7 @@ func _show_settings() -> void:
 			Preferences.auto_start())
 	_method_option.selected = 1 if Preferences.english() else 0
 	_whole_back_box.button_pressed = Preferences.whole_back()
+	_symbols_box.button_pressed = Preferences.step_symbols()
 	_whole_back_box.disabled = Preferences.english()
 	_block_spin.value = Preferences.max_block()
 	_needle_option.selected = 1 if Preferences.needle_fixed() else 0
@@ -1067,6 +1128,8 @@ func _apply_settings() -> void:
 	Preferences.set_direction(corner[1], corner[2], corner[3])
 	Preferences.set_english(_method_option.selected == 1)
 	Preferences.set_whole_back(_whole_back_box.button_pressed)
+	Preferences.set_step_symbols(_symbols_box.button_pressed)
+	_update_symbols()
 	Preferences.set_max_block(int(_block_spin.value))
 	Preferences.set_stitch_style(_needle_option.selected == 1, _leg_option.selected == 0,
 			_needle_start_option.selected == 1)
@@ -1543,6 +1606,8 @@ func _refresh_stitching() -> void:
 	_stitch_panel.show_step(floss, step, position_text, session.done_count(thread),
 			session.steps(thread).size(), session.finished_crosses(thread),
 			pattern.stitch_counts()[thread], thread_start)
+	_symbols.show_step(step, hint, _style, new_thread, thread_end.x >= 0)
+	_update_symbols()
 	_info_label.text = ""
 
 
@@ -1629,6 +1694,7 @@ func _handle_cmdline() -> void:
 	var finale := false
 	var dismiss := false
 	var wait := 0.0
+	var symbols_card := PackedStringArray()
 	for arg in OS.get_cmdline_user_args():
 		if arg.begins_with("--open="):
 			_open_image(arg.trim_prefix("--open="))
@@ -1665,6 +1731,12 @@ func _handle_cmdline() -> void:
 			Preferences.set_stitch_style(true, arg.trim_prefix("--first-leg=") == "slash",
 					Preferences.needle_from_top())
 			_apply_style()
+		elif arg.begins_with("--symbols="):
+			var symbols := arg.trim_prefix("--symbols=").split(",")
+			if symbols[0] in ["on", "off"]:
+				Preferences.set_step_symbols(symbols[0] == "on")
+			else:
+				symbols_card = symbols
 		elif arg == "--back":
 			back = true
 		elif arg == "--finish":
@@ -1732,6 +1804,10 @@ func _handle_cmdline() -> void:
 				_celebration.leave()
 				while _stitch_thread >= 0:
 					await get_tree().process_frame
+		if not symbols_card.is_empty():
+			var card: int = ["secure", "thread", "count", "stitch"].find(symbols_card[0])
+			if card >= 0:
+				_symbols.hold(card as StepSymbols.Card, symbols_card[1].to_float() if symbols_card.size() > 1 else 1.0)
 		var step := _project.session.current_step(_stitch_thread) if _stitch_thread >= 0 else null
 		if zoom > 0.0 and step != null:
 			_view.focus_step(step, zoom)

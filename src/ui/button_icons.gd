@@ -43,13 +43,13 @@ static func button_icon(icon: Icon, px: int) -> ImageTexture:
 ## pixels long. Its outline follows the user's drawing (Input des Users/Needel.svg, coordinates
 ## below in its units): a round head with a long eye, a shaft tapering towards a blunt
 ## elliptical point, in the drawing's ratio of about 18 : 1. Shaded as polished steel under the
-## default test light, the eye see-through.
-static func needle_icon(width: int) -> ImageTexture:
-	var key := "needle/%d" % width
+## default test light, the eye see-through; `flat` makes it plain white instead (StepSymbols).
+static func needle_icon(width: int, flat := false) -> ImageTexture:
+	var key := "needle/%d/%s" % [width, flat]
 	if _cache.has(key):
 		return _cache[key]
-	const LEFT := 70.0
-	const RIGHT := 523.4
+	const LEFT := NEEDLE_LEFT
+	const RIGHT := NEEDLE_RIGHT
 	const TOP := 202.9
 	const BOTTOM := 228.2
 	var scale := width / (RIGHT - LEFT)
@@ -64,6 +64,9 @@ static func needle_icon(width: int) -> ImageTexture:
 			if coverage <= 0.0:
 				image.set_pixel(x, y, Color(0, 0, 0, 0))
 				continue
+			if flat:
+				image.set_pixel(x, y, Color(1, 1, 1, coverage))
+				continue
 			# Round across: the normal tilts up or down with the height inside the outline.
 			var v := clampf((p.y - NEEDLE_AXIS) / _needle_half_height(p.x), -1.0, 1.0)
 			var normal := Vector3(0.0, v, sqrt(1.0 - v * v))
@@ -76,7 +79,9 @@ static func needle_icon(width: int) -> ImageTexture:
 	return _cache[key]
 
 
-## The needle's middle line and its parts, in the drawing's units.
+## The needle's ends along its length, its middle line and its parts, in the drawing's units.
+const NEEDLE_LEFT := 70.0
+const NEEDLE_RIGHT := 523.4
 const NEEDLE_AXIS := 215.5
 const NEEDLE_HEAD := Vector2(82.63, 215.54)
 const NEEDLE_HEAD_RADIUS := 12.59

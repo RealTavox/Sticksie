@@ -104,6 +104,15 @@ static func set_light(azimuth: float, elevation: float) -> void:
 	_store("light_elevation", elevation, "view")
 
 
+## Whether the stitching screen shows the symbol window (StepSymbols); on by default.
+static func step_symbols() -> bool:
+	return bool(_load().get_value("ui", "step_symbols", true))
+
+
+static func set_step_symbols(value: bool) -> void:
+	_store("step_symbols", value, "ui")
+
+
 ## Whether the screen is laid out for touch (a full-screen view with round buttons that open
 ## overlays) instead of the desktop layout with toolbar and side panel. Defaults to touch on
 ## phones and tablets.
