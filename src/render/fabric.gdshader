@@ -1,6 +1,7 @@
 shader_type spatial;
 // Aida fabric, both faces: the woven relief from StitchTextures, and the chart's grid as a line
-// every 10 cells and round the pattern.
+// every 10 cells and round the pattern. The bare fabric round the pattern is tinted, so its cells
+// aren't taken for part of the pattern.
 render_mode cull_disabled, diffuse_lambert, specular_disabled;
 
 #include "res://src/render/flip.gdshaderinc"
@@ -8,6 +9,7 @@ render_mode cull_disabled, diffuse_lambert, specular_disabled;
 uniform vec3 fabric_color : source_color = vec3(0.96, 0.945, 0.9);
 uniform vec2 pattern_size = vec2(10.0);
 uniform vec4 grid_color : source_color = vec4(0.32, 0.4, 0.55, 0.45);
+uniform vec4 margin_color : source_color = vec4(0.17, 0.47, 0.88, 0.35);
 uniform sampler2D normal_map : filter_linear_mipmap_anisotropic, repeat_enable;
 uniform sampler2D shade_map : filter_linear_mipmap_anisotropic, repeat_enable;
 
@@ -42,6 +44,8 @@ void fragment() {
 	vec2 inside = step(vec2(-0.03), v_grid) * step(v_grid, pattern_size + 0.03);
 	float grid = max(line.x * inside.y, line.y * inside.x) * grid_color.a;
 
-	ALBEDO = mix(fabric_color * shade, grid_color.rgb * mix(0.6, 1.0, shade), grid);
+	vec2 within = smoothstep(-pixel * 0.5, pixel * 0.5, v_grid) * smoothstep(-pixel * 0.5, pixel * 0.5, pattern_size - v_grid);
+	vec3 base = mix(fabric_color, margin_color.rgb, margin_color.a * (1.0 - within.x * within.y));
+	ALBEDO = mix(base * shade, grid_color.rgb * mix(0.6, 1.0, shade), grid);
 	ROUGHNESS = 1.0;
 }

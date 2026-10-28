@@ -33,8 +33,11 @@ item is resolved during normal work, delete its entry in the same change.
   rules) and position hints
   (`PositionHint`: the nearest findable stitch to count from, any colour: the last stitch
   made or the end of a run, never a stitch in the middle of a row of equal stitches; before the
-  very first stitch the nearest corner of the pattern, landmark `CORNER`), `render/`
-  the 3D fabric and thread (`StitchScene`: orthographic camera, Aida plane, one MultiMesh
+  very first stitch the nearest corner of the pattern, landmark `CORNER`; counting runs from hole to
+  hole, `PositionHint.holes`, from the reference's hole nearest to the needle's first hole, or from
+  the pattern's outer corner hole itself for `CORNER`), `render/`
+  the 3D fabric and thread (`StitchScene`: orthographic camera, Aida plane with one bare
+  cell round the pattern tinted in a see-through button blue (`MARGIN_COLOR`), one MultiMesh
   instance per leg or back stitch, soft shadows reusing the same MultiMeshes, the flip as a turn
   about a vertical axis with a little perspective from `flip.gdshaderinc`; `StitchTextures`
   makes the fabric and floss normal and shade maps procedurally on first use, in their own
@@ -43,8 +46,8 @@ item is resolved during normal work, delete its entry in the same change.
   views (`PatternView` draws `StitchScene` from a SubViewport and its 2D marks on top with the
   same grid-to-screen mapping; preview mode shows every cell as a finished cross, progress mode
   the stitched legs, the current block with an arrow along every leg (up hole to down hole) and
-  its stitch count in a badge, the counting path in turquoise from hole to hole (from the
-  reference's corner matching the needle's first hole to that hole, so each hop is a cell) with
+  its stitch count in a badge, the counting path in turquoise from hole to hole (`PositionHint.holes`, so each hop is a
+  cell; before the first stitch the ring sits on the pattern's corner hole) with
   small numbers plus each leg's total in a badge like the block count, and the thread labels a cell away with a leader line, moved to the
   other side when a badge or the path is in the way; the block colour is orange or the button
   blue, whichever differs more from the thread (`contrast_color()`, CIEDE2000), the thread

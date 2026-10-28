@@ -1518,7 +1518,8 @@ func _refresh_stitching() -> void:
 	var position_text := ""
 	var thread_start := StitchSession.ThreadStart.NONE
 	if step != null:
-		hint = PositionHint.find(pattern, states, step, session.last_cell(thread))
+		hint = PositionHint.find(pattern, states, step, session.last_cell(thread),
+				Vector2i(_style.needle_holes(step)[0].round()))
 		thread_start = session.thread_start(thread, session.current_index(thread))
 		position_text = StitchPanel.describe_position(step, hint, pattern, states, _style)
 		var thread_text := StitchPanel.describe_thread(step, thread_start, session.max_skip)

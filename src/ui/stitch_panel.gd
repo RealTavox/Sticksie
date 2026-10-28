@@ -161,12 +161,14 @@ static func describe_position(step: StitchStep, hint: PositionHint, pattern: Pat
 		var corner := describe_pattern_corner(hint.reference, pattern)
 		text = "Erster Stich: Lege auf dem Stoff fest, wo die Ecke %s des Musters (%d × %d) liegen soll (Ring). " % [
 				corner, pattern.width, pattern.height]
-		if hint.offset() == Vector2i.ZERO:
-			text += "Genau dort anfangen."
+		if hint.count() == Vector2i.ZERO:
+			text += "Genau in diesem Eckloch anfangen."
 		else:
-			text += describe_offset(hint.offset(), "der Ecke")
-	else:
+			text += describe_count(hint.count(), "dem Eckloch")
+	elif maxi(absi(hint.offset().x), absi(hint.offset().y)) <= 1:
 		text = describe_offset(hint.offset(), describe_reference(hint, pattern, states))
+	else:
+		text = describe_count(hint.count(), "dem nächsten Loch an " + describe_reference(hint, pattern, states))
 	var corner := describe_corner(step, style)
 	match step.kind:
 		StitchStep.Kind.HALF:
@@ -226,6 +228,13 @@ static func describe_offset(offset: Vector2i, reference: String) -> String:
 		return "Direkt %s %s." % [vertical, reference]
 	if absi(offset.x) == 1 and absi(offset.y) == 1:
 		return "Schräg %s %s %s." % [horizontal, vertical, reference]
+	return describe_count(offset, reference)
+
+
+## Counting `offset` holes (or cells) from `from` (dative), the longer direction first, as in the
+## picture, e.g. "Ab dem Eckloch zählen: 3 nach rechts, dann 2 nach unten.".
+static func describe_count(offset: Vector2i, from: String) -> String:
+	var horizontal := "rechts" if offset.x > 0 else "links"
 	var legs: Array[String] = []
 	if offset.x != 0:
 		legs.append("%d nach %s" % [absi(offset.x), horizontal])
@@ -233,7 +242,7 @@ static func describe_offset(offset: Vector2i, reference: String) -> String:
 		legs.append("%d nach %s" % [absi(offset.y), "unten" if offset.y > 0 else "oben"])
 	if absi(offset.y) > absi(offset.x):
 		legs.reverse()
-	return "Ab %s zählen: %s." % [reference, ", dann ".join(legs)]
+	return "Ab %s zählen: %s." % [from, ", dann ".join(legs)]
 
 
 func _make_button(text: String, icon: ButtonIcons.Icon) -> Button:

@@ -7,6 +7,10 @@ extends RefCounted
 ## thread, or half stitch next to cross). Of those, the closest wins, preferring a straight line
 ## to count along, and on a tie one in the same row. Before the very first stitch, counting
 ## starts at the nearest corner of the pattern, which the user places on the fabric.
+##
+## Counting goes from hole to hole (the needle holes at the cells' corners): from the reference
+## stitch's hole nearest to where the needle comes up, or from the pattern's corner hole itself
+## before the first stitch, to the needle's hole.
 
 enum Landmark {
 	## The stitch just made; the needle is there.
@@ -25,17 +29,22 @@ var reference: Vector2i
 var landmark: Landmark
 ## The first cell of the step.
 var target: Vector2i
-## Cells to count, from the one after `reference` to `target`: first along the longer
-## direction, then along the shorter one.
-var path: Array[Vector2i] = []
+## The hole counting starts at, and the hole where the needle comes up first (grid points).
+var start: Vector2i
+var needle: Vector2i
+## Holes to count, from the one after `start` to `needle`: first along the longer direction,
+## then along the shorter one.
+var holes: Array[Vector2i] = []
 
 
 ## The hint for `step`, given the cell states (StitchSession.Cell per cell) before it and the
-## last stitched cell of its thread ((-1, -1) if none). Null for a return pass (it runs back
-## over its own half stitches). When nothing is stitched yet, the reference is the corner of the
-## pattern nearest to the step (on a tie: top before bottom, left before right).
+## last stitched cell of its thread ((-1, -1) if none), and the hole where the needle comes up
+## first (StitchStyle.needle_holes(); by default the first cell's top left). Null for a return
+## pass (it runs back over its own half stitches). When nothing is stitched yet, the reference
+## is the corner of the pattern nearest to the step (on a tie: top before bottom, left before
+## right).
 static func find(pattern: Pattern, states: PackedByteArray, step: StitchStep,
-		last_cell := Vector2i(-1, -1)) -> PositionHint:
+		last_cell := Vector2i(-1, -1), needle_hole := Vector2i(-1, -1)) -> PositionHint:
 	if step.kind == StitchStep.Kind.BACK:
 		return null
 	var target := Vector2i(step.cells[0], step.row)
@@ -70,16 +79,38 @@ static func find(pattern: Pattern, states: PackedByteArray, step: StitchStep,
 				best_cost = cost
 				best = cell
 				best_landmark = landmark
-	if best.x < 0:
-		best = Vector2i(0 if target.x * 2 <= pattern.width - 1 else pattern.width - 1,
-				0 if target.y * 2 <= pattern.height - 1 else pattern.height - 1)
-		best_landmark = Landmark.CORNER
 	var hint := PositionHint.new()
+	hint.target = target
+	hint.needle = needle_hole if needle_hole.x >= 0 else target
+	if best.x < 0:
+		var left := target.x * 2 <= pattern.width - 1
+		var top := target.y * 2 <= pattern.height - 1
+		best = Vector2i(0 if left else pattern.width - 1, 0 if top else pattern.height - 1)
+		best_landmark = Landmark.CORNER
+		hint.start = Vector2i(0 if left else pattern.width, 0 if top else pattern.height)
+	else:
+		hint.start = _nearest_hole(best, hint.needle - target, hint.needle)
 	hint.reference = best
 	hint.landmark = best_landmark
-	hint.target = target
-	hint.path = _counting_path(best, target)
+	hint.holes = _counting_path(hint.start, hint.needle)
 	return hint
+
+
+## The corner hole of `cell` closest to `needle`; on a tie the one at the same corner of its cell
+## as the needle's (`needle_corner`).
+static func _nearest_hole(cell: Vector2i, needle_corner: Vector2i, needle: Vector2i) -> Vector2i:
+	var best := cell + needle_corner
+	var best_distance := _hops(best, needle)
+	for corner: Vector2i in [Vector2i(0, 0), Vector2i(1, 0), Vector2i(0, 1), Vector2i(1, 1)]:
+		var distance := _hops(cell + corner, needle)
+		if distance < best_distance:
+			best = cell + corner
+			best_distance = distance
+	return best
+
+
+static func _hops(a: Vector2i, b: Vector2i) -> int:
+	return absi(a.x - b.x) + absi(a.y - b.y)
 
 
 ## What a cell looks like on the fabric: -1 for empty (or outside the pattern), otherwise
@@ -97,12 +128,17 @@ func offset() -> Vector2i:
 	return target - reference
 
 
+## The holes to count, from `start` to `needle`.
+func count() -> Vector2i:
+	return needle - start
+
+
 ## Where the counting path turns: the end of its first, longer leg.
-func corner() -> Vector2i:
-	var delta := offset()
+func bend() -> Vector2i:
+	var delta := count()
 	if absi(delta.x) >= absi(delta.y):
-		return Vector2i(target.x, reference.y)
-	return Vector2i(reference.x, target.y)
+		return Vector2i(needle.x, start.y)
+	return Vector2i(start.x, needle.y)
 
 
 static func _counting_path(from: Vector2i, to: Vector2i) -> Array[Vector2i]:

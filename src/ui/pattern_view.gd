@@ -673,54 +673,60 @@ func _draw_badge(center: Vector2, text: String, color: Color) -> void:
 			text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, Color.WHITE)
 
 
-## A ring around the reference stitch, a line along the counting path ending in an arrow, and
-## the count at every hole of the path. Counting goes from hole to hole: the path starts at the
-## reference stitch's corner that matches the hole where the needle comes up in the step, and
-## ends at that hole, so each hop is one cell. Each leg has its own colour (left/right, up/down)
+## A ring around the reference stitch (before the first stitch: around the pattern's corner
+## hole), a line along the counting path ending in an arrow, and the count at every hole of the
+## path. Counting goes from hole to hole (PositionHint.holes): from the reference's hole nearest
+## to where the needle comes up in the step, to that hole, so each hop is one cell. Each leg has its own colour (left/right, up/down)
 ## and counts from 1 again: "1, 2 down, then 1, 2, 3 right".
 func _draw_hint(hint: PositionHint) -> void:
-	var reference := _cell_rect(hint.reference.x, hint.reference.y)
 	var line_width := maxf(2.0, _cell_px * 0.08)
-	draw_arc(reference.get_center(), _cell_px * 0.62, 0.0, TAU, 32, HINT_COLOR, line_width)
-	_taken.append(reference)
-	if hint.path.is_empty():
+	var start := _hole_point(Vector2(hint.start))
+	if hint.landmark == PositionHint.Landmark.CORNER:
+		# The pattern's corner hole itself, where the user places the pattern on the fabric.
+		var radius := _cell_px * 0.4
+		draw_arc(start, radius, 0.0, TAU, 32, HINT_COLOR, line_width)
+		_taken.append(Rect2(start - Vector2.ONE * radius, Vector2.ONE * radius * 2.0))
+	else:
+		var reference := _cell_rect(hint.reference.x, hint.reference.y)
+		draw_arc(reference.get_center(), _cell_px * 0.62, 0.0, TAU, 32, HINT_COLOR, line_width)
+		_taken.append(reference)
+	draw_circle(start, maxf(2.0, _cell_px * 0.1), HINT_COLOR)
+	if hint.holes.is_empty():
 		return
 	var number_radius := _cell_px * 0.24
-	for cell in hint.path:
-		_taken.append(Rect2(_count_point(cell) - Vector2.ONE * number_radius, Vector2.ONE * number_radius * 2.0))
-	var corners: Array[Vector2i] = [hint.reference]
-	var corner := hint.corner()
-	if corner != hint.reference and corner != hint.target:
-		corners.append(corner)
-	corners.append(hint.target)
-	var start := _count_point(hint.reference)
-	draw_circle(start, maxf(2.0, _cell_px * 0.1), HINT_COLOR)
+	for hole in hint.holes:
+		_taken.append(Rect2(_hole_point(Vector2(hole)) - Vector2.ONE * number_radius, Vector2.ONE * number_radius * 2.0))
+	var corners: Array[Vector2i] = [hint.start]
+	var bend := hint.bend()
+	if bend != hint.start and bend != hint.needle:
+		corners.append(bend)
+	corners.append(hint.needle)
 	for i in range(1, corners.size()):
-		draw_line(_count_point(corners[i - 1]), _count_point(corners[i]),
+		draw_line(_hole_point(Vector2(corners[i - 1])), _hole_point(Vector2(corners[i])),
 				Color(_leg_color(corners[i] - corners[i - 1]), 0.6), line_width)
 	var last_leg := corners[-1] - corners[-2]
-	var target := _count_point(hint.target)
-	var direction := (target - _count_point(corners[-2])).normalized()
+	var target := _hole_point(Vector2(hint.needle))
+	var direction := (target - _hole_point(Vector2(corners[-2]))).normalized()
 	var tip := target - direction * _cell_px * 0.12
 	var side := direction.orthogonal() * _cell_px * 0.18
 	var back := tip - direction * _cell_px * 0.28
 	draw_colored_polygon(PackedVector2Array([tip, back + side, back - side]), _leg_color(last_leg))
-	if hint.path.size() < 2:
-		return  # Directly adjacent: nothing to count.
+	if hint.holes.size() < 2:
+		return  # The very next hole: nothing to count.
 	var font := get_theme_default_font()
 	var font_size := int(_cell_px * 0.36)
 	var count := 0
-	var previous := hint.reference
+	var previous := hint.start
 	var previous_step := Vector2i.ZERO
-	for cell in hint.path:
-		var step := cell - previous
+	for hole in hint.holes:
+		var step := hole - previous
 		count = count + 1 if step == previous_step else 1
-		previous = cell
+		previous = hole
 		previous_step = step
-		if cell == hint.target:
+		if hole == hint.needle:
 			continue  # The arrow points at the needle's hole; its count is in the badge.
 		var color := _leg_color(step)
-		var center := _count_point(cell)
+		var center := _hole_point(Vector2(hole))
 		if _cell_px < MIN_NUMBER_CELL_PX:
 			draw_circle(center, maxf(1.5, _cell_px * 0.1), color)
 			continue
@@ -733,15 +739,6 @@ func _draw_hint(hint: PositionHint) -> void:
 	_draw_leg_totals(corners)
 
 
-## The hole of `cell` that counting uses: the same corner as the hole where the needle comes up
-## first in the current step.
-func _count_point(cell: Vector2i) -> Vector2:
-	var corner := Vector2.ZERO
-	if _highlight != null:
-		corner = style.needle_holes(_highlight)[0] - Vector2(_highlight.cells[0], _highlight.row)
-	return _hole_point(Vector2(cell) + corner)
-
-
 ## The count of each counting leg once more, big as the block count, beside the hole where the
 ## leg ends, clear of the step's row: a first leg up or down goes on past its end, a first leg
 ## left or right gets it on the side away from the next leg; the last leg (ending at the step)
@@ -750,11 +747,11 @@ func _count_point(cell: Vector2i) -> Vector2:
 func _draw_leg_totals(corners: Array[Vector2i]) -> void:
 	for i in range(1, corners.size()):
 		var leg := corners[i] - corners[i - 1]
-		var start := _count_point(corners[i - 1])
-		var end := _count_point(corners[i])
+		var start := _hole_point(Vector2(corners[i - 1]))
+		var end := _hole_point(Vector2(corners[i]))
 		var side := Vector2.UP
 		if i + 1 < corners.size():
-			var next := _count_point(corners[i + 1])
+			var next := _hole_point(Vector2(corners[i + 1]))
 			side = (end - start if leg.x == 0 else end - next).normalized()
 		elif leg.x == 0:
 			side = Vector2.RIGHT if _highlight != null and _block_count_left(_highlight) else Vector2.LEFT

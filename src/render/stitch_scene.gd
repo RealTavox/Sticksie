@@ -23,8 +23,10 @@ const BACK_LIFT := 0.035
 const SHADOW_HEIGHT := 0.07
 const SHADOW_STRENGTH := 0.5
 const GHOST_OPACITY := 0.4
-## Bare fabric round the pattern, in cells.
+## Bare fabric round the pattern, in cells, tinted with MARGIN_COLOR (the buttons' blue, see
+## through) so it isn't taken for part of the pattern.
 const FABRIC_MARGIN := 1.0
+const MARGIN_COLOR := Color(RoundButton.DEFAULT_TINT, 0.35)
 const FABRIC_COLOR := Color8(245, 241, 230)
 ## Perspective at the middle of the flip, as a part of the fabric's size.
 const FLIP_PERSPECTIVE := 0.35
@@ -83,6 +85,7 @@ func _init() -> void:
 	_fabric_material.set_shader_parameter("normal_map", fabric_textures[0])
 	_fabric_material.set_shader_parameter("shade_map", fabric_textures[1])
 	_fabric_material.set_shader_parameter("fabric_color", FABRIC_COLOR)
+	_fabric_material.set_shader_parameter("margin_color", MARGIN_COLOR)
 	_fabric.mesh = QuadMesh.new()
 	_fabric.material_override = _fabric_material
 	_turn.add_child(_fabric)

@@ -340,26 +340,32 @@ func _test_position_hint() -> void:
 	var first := session.current_step(0)
 	var from_corner := PositionHint.find(pattern, session.cell_states(), first)
 	_check(from_corner != null and from_corner.landmark == PositionHint.Landmark.CORNER
-			and from_corner.reference == Vector2i(0, 0) and from_corner.path.is_empty(),
-			"the very first stitch counts from the nearest pattern corner")
+			and from_corner.reference == Vector2i(0, 0) and from_corner.start == Vector2i(0, 0)
+			and from_corner.holes.is_empty(),
+			"the very first stitch counts from the nearest pattern corner's hole")
 	_check(StitchPanel.describe_position(first, from_corner, pattern, session.cell_states(),
-			StitchStyle.new()).begins_with("Erster Stich: Lege auf dem Stoff fest, wo die Ecke oben links des Musters (5 × 4) liegen soll (Ring). Genau dort anfangen."),
+			StitchStyle.new()).begins_with("Erster Stich: Lege auf dem Stoff fest, wo die Ecke oben links des Musters (5 × 4) liegen soll (Ring). Genau in diesem Eckloch anfangen."),
 			"first stitch text names the corner")
 	var lone := _pattern(["....", "....", "...0", "...."])
 	var lone_step := StitchSession.new(lone).current_step(0)
 	var lone_hint := PositionHint.find(lone, PackedByteArray([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), lone_step)
-	_check(lone_hint.reference == Vector2i(3, 3) and lone_hint.offset() == Vector2i(0, -1),
-			"nearest corner is bottom right: %s" % lone_hint.reference)
+	_check(lone_hint.reference == Vector2i(3, 3) and lone_hint.start == Vector2i(4, 4)
+			and lone_hint.count() == Vector2i(-1, -2),
+			"nearest corner is bottom right, counted from its outer hole: %s" % lone_hint.start)
 	_check(StitchPanel.describe_position(lone_step, lone_hint, lone, PackedByteArray(), StitchStyle.new())
-			.begins_with("Erster Stich: Lege auf dem Stoff fest, wo die Ecke unten rechts des Musters (4 × 4) liegen soll (Ring). Direkt über der Ecke."),
-			"text counts from the bottom right corner")
+			.begins_with("Erster Stich: Lege auf dem Stoff fest, wo die Ecke unten rechts des Musters (4 × 4) liegen soll (Ring). Ab dem Eckloch zählen: 2 nach oben, dann 1 nach links."),
+			"text counts from the bottom right corner hole")
 
 	session.advance(0)
 	var after_gap := session.current_step(0)
 	var hint := PositionHint.find(pattern, session.cell_states(), after_gap)
 	_check(hint != null and hint.reference == Vector2i(2, 0) and hint.target == Vector2i(4, 0),
 			"after a gap, count from the end of the last block")
-	_check(hint != null and hint.path == [Vector2i(3, 0), Vector2i(4, 0)], "path counts 2 cells")
+	_check(hint != null and hint.start == Vector2i(3, 0) and hint.holes == [Vector2i(4, 0)],
+			"count from the reference's hole nearest the needle")
+	var far := PositionHint.find(pattern, session.cell_states(), after_gap, Vector2i(-1, -1), Vector2i(5, 1))
+	_check(far.start == Vector2i(3, 1) and far.holes == [Vector2i(4, 1), Vector2i(5, 1)],
+			"the nearest hole follows the needle's hole: %s" % [far.holes])
 
 	session.advance(0)
 	_check(PositionHint.find(pattern, session.cell_states(), session.current_step(0)) == null,
@@ -372,13 +378,13 @@ func _test_position_hint() -> void:
 	hint = PositionHint.find(pattern, session.cell_states(), down)
 	_check(hint != null and hint.reference == Vector2i(0, 0), "straight line wins: %s" % [
 			hint.reference if hint else null])
-	_check(hint != null and hint.path == [Vector2i(0, 1), Vector2i(0, 2), Vector2i(0, 3)],
-			"path goes straight down")
+	_check(hint != null and hint.start == Vector2i(0, 1) and hint.holes == [Vector2i(0, 2), Vector2i(0, 3)],
+			"path goes straight down from the reference's lower hole")
 
 	# Thread 1 at (2, 2): two below (2, 0), any colour counts as reference.
 	hint = PositionHint.find(pattern, session.cell_states(), session.current_step(1))
 	_check(hint != null and hint.reference == Vector2i(2, 0), "other thread as reference")
-	_check(hint != null and hint.corner() == hint.target, "a straight path has its corner at the target")
+	_check(hint != null and hint.bend() == hint.needle, "a straight path has its bend at the needle")
 
 	# The stitch just made is a reference even inside a run; the cross above it is not.
 	var tie := _pattern(["1111111111", "0000000000"])
@@ -404,10 +410,10 @@ func _test_position_hint() -> void:
 
 	# Bent path: longer leg first.
 	var bent := PositionHint.new()
-	bent.reference = Vector2i(0, 0)
-	bent.target = Vector2i(3, 1)
-	_check(bent.corner() == Vector2i(3, 0), "corner after the longer horizontal leg")
-	_check(PositionHint._counting_path(bent.reference, bent.target)
+	bent.start = Vector2i(0, 0)
+	bent.needle = Vector2i(3, 1)
+	_check(bent.bend() == Vector2i(3, 0), "bend after the longer horizontal leg")
+	_check(PositionHint._counting_path(bent.start, bent.needle)
 			== [Vector2i(1, 0), Vector2i(2, 0), Vector2i(3, 0), Vector2i(3, 1)], "bent path")
 
 
