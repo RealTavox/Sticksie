@@ -104,9 +104,10 @@ item is resolved during normal work, delete its entry in the same change.
   side, each animated once, one after the other from left to right (waiting ones faded), then
   standing; redrawn at most 30 times a second while playing: securing the old thread (needle
   under the back stitches, scissors), threading (the doubled thread through the eye of the
-  user's needle, `ButtonIcons.needle_icon(…, true)` flat white), starting with the loop (side
-  view: down through a hole, up through the next, through the loop, back down the same hole),
-  counting (an arrow per direction with its count) and the stitch (up hole, down hole, arrow,
+  user's needle, `ButtonIcons.needle_icon(…, true)` flat white), counting (an arrow per
+  direction with its count), starting with the loop (side view: the needle goes down through a
+  hole and brings the loop, an arch with straight strands into the hole; up through the next
+  hole, through the loop, back down the same hole) and the stitch (up hole, down hole, arrow,
   how many),
   `SkeinSwatch` a thread colour drawn as a square of the pure
   colour with a loop of thread coming out of it (one colourless template image per shape,

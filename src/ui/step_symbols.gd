@@ -4,9 +4,9 @@ extends Control
 ## a square card per part of the step side by side, each with a short animation that plays once,
 ## one card after the other from left to right, then stays: securing the old thread (the needle
 ## goes under the stitches on the back, then scissors cut it), threading a new one (the doubled
-## thread goes through the needle's eye), starting it with the loop (down through a hole, up
-## through the next, through the loop and back down), counting holes (an arrow per direction
-## with its count) and the stitch itself (one leg from the hole where the needle comes up to
+## thread goes through the needle's eye), counting holes (an arrow per direction with its
+## count), starting the thread with the loop (down through a hole bringing the loop, up through
+## the next, through the loop and back down) and the stitch itself (one leg from the hole where the needle comes up to
 ## where it goes down, and how many). Symbols, not pictures: only white lines, dots and numbers
 ## on the overlays' see-through grey.
 
@@ -56,9 +56,9 @@ func _init() -> void:
 			/ (ButtonIcons.NEEDLE_RIGHT - ButtonIcons.NEEDLE_LEFT))
 
 
-## The cards for `step` (null: the colour is finished): securing when the old thread ends here
-## (`secure`), threading and starting with the loop when a new one starts, counting when holes
-## have to be counted, and the stitch. The window grows to hold them, and they play from the
+## The cards for `step` (null: the colour is finished), in this order: securing when the old
+## thread ends here (`secure`), threading when a new one starts, counting when holes have to be
+## counted, starting the new thread with the loop, and the stitch. The window grows to hold them, and they play from the
 ## start.
 func show_step(step: StitchStep, hint: PositionHint, style: StitchStyle, new_thread: bool,
 		secure: bool) -> void:
@@ -68,13 +68,14 @@ func show_step(step: StitchStep, hint: PositionHint, style: StitchStyle, new_thr
 	if step != null:
 		if new_thread:
 			_cards.append(Card.THREAD)
-			_cards.append(Card.ANCHOR)
 		if hint != null and hint.holes.size() >= 2:
 			_cards.append(Card.COUNT)
 			_legs.clear()
 			for leg in [hint.bend() - hint.start, hint.needle - hint.bend()]:
 				if leg != Vector2i.ZERO:
 					_legs.append(leg)
+		if new_thread:
+			_cards.append(Card.ANCHOR)
 		_cards.append(Card.STITCH)
 		_stitch_legs.clear()
 		var holes := style.needle_holes(step)
@@ -351,61 +352,79 @@ class CardView:
 	static func _ease(x: float) -> float:
 		return x * x * (3.0 - 2.0 * x)
 
-	## Starting with the loop (the doubled thread): seen from the side, the needle goes down
-	## through a hole, leaving the loop on top; comes up through the next hole, goes through the
-	## loop and back down through that same hole, and the loop pulls tight.
+	## Starting with the loop (the doubled thread), seen from the side: the needle goes down
+	## through a hole and brings the loop after it, which stays on top, an arch with both strands
+	## going straight down into the hole; the needle comes up through the next hole, goes through
+	## the loop and back down through that same hole, and the loop pulls tight.
 	func _draw_anchor(box: Rect2, t: float, ink: Color) -> void:
-		var y := box.get_center().y + 8.0
+		var y := box.get_center().y + 10.0
 		var a := box.position.x + box.size.x * 0.3
 		var b := box.position.x + box.size.x * 0.7
 		var dim := Color(ink, ink.a * 0.5)
 		for span in [[0.0, a - 4.0], [a + 4.0, b - 4.0], [b + 4.0, size.x]]:
 			draw_line(Vector2(span[0], y), Vector2(span[1], y), dim, 5.0)
-		var tight := _ease(clampf((t - 0.8) / 0.2, 0.0, 1.0))
-		# The loop lies beside the first hole, its thread running into the hole.
-		var loop := Vector2(lerpf(a - 13.0, a - 6.0, tight), lerpf(y - 15.0, y - 7.0, tight))
-		var radius := lerpf(8.0, 4.0, tight)
-		var loop_foot := loop + Vector2(radius, radius) * 0.7
-		var hole_a := Vector2(a, y)
-		var below := y + 9.0
 		var length := 110.0
+		var below := y + 9.0
+		var hole := Vector2(a, y)
+		var tight := _ease(clampf((t - 0.8) / 0.2, 0.0, 1.0))
+		var radius := lerpf(7.0, 3.0, tight)
+		# Where the top of the loop's arch rests once it has come.
+		var arch_top := lerpf(y - 28.0, y - 10.0, tight)
+		# Where the strands go down to: the hole, or the eye while that is still above it.
+		var strands_to := hole
 		var point: Vector2
 		var angle := PI / 2.0
 		var threads: Array[PackedVector2Array] = []
+		var through := false
 		if t < 0.3:
-			# Down through the first hole; the loop stays on top.
-			point = Vector2(a, lerpf(box.position.y - 6.0, y + 28.0, _ease(t / 0.28)))
-			threads.append(PackedVector2Array([loop_foot, hole_a, _eye(point, angle, length)]))
+			# Down through the first hole and on out of sight; the loop follows the eye.
+			point = Vector2(a, lerpf(box.position.y - 6.0, y + 110.0, _ease(clampf(t / 0.28, 0.0, 1.0))))
+			var eye := _eye(point, angle, length)
+			arch_top = minf(eye.y - 30.0, arch_top)
+			if eye.y < y:
+				strands_to = eye
+			else:
+				threads.append(PackedVector2Array([hole, eye]))
 		elif t < 0.55:
 			# Under the fabric to the next hole and up through it.
 			angle = -PI / 2.0
 			point = Vector2(b, lerpf(y + 44.0, y - 30.0, _ease(clampf((t - 0.3) / 0.22, 0.0, 1.0))))
-			threads.append(PackedVector2Array([loop_foot, hole_a, Vector2(a, below), Vector2(b, below),
+			threads.append(PackedVector2Array([hole, Vector2(a, below), Vector2(b, below),
 					_eye(point, angle, length)]))
 		elif t < 0.78:
-			# Through the loop.
+			# Through the loop, between its strands.
 			angle = PI
-			point = Vector2(lerpf(b - 6.0, loop.x - 22.0, _ease(clampf((t - 0.55) / 0.2, 0.0, 1.0))), loop.y)
-			threads.append(PackedVector2Array([loop_foot, hole_a, Vector2(a, below), Vector2(b, below), Vector2(b, y),
+			through = true
+			point = Vector2(lerpf(b - 6.0, a - 26.0, _ease(clampf((t - 0.55) / 0.2, 0.0, 1.0))),
+					lerpf(arch_top + radius, y, 0.45))
+			threads.append(PackedVector2Array([hole, Vector2(a, below), Vector2(b, below), Vector2(b, y),
 					_eye(point, angle, length)]))
 		else:
 			# Back down through the same hole; the loop closes round the thread.
 			point = Vector2(b, lerpf(y - 30.0, y + 30.0, _ease(clampf((t - 0.78) / 0.2, 0.0, 1.0))))
-			threads.append(PackedVector2Array([loop_foot, hole_a, Vector2(a, below), Vector2(b, below)]))
-			threads.append(PackedVector2Array([loop + Vector2(radius, 0.0), Vector2(b, y - 3.0),
-					_eye(point, angle, length)]))
-		var through := t >= 0.55 and t < 0.78
-		if through:
-			draw_arc(loop, radius, -PI / 2.0, PI / 2.0, 12, ink, 2.0)
-		else:
-			draw_arc(loop, radius, 0.0, TAU, 20, ink, 2.0)
+			threads.append(PackedVector2Array([hole, Vector2(a, below), Vector2(b, below)]))
+			threads.append(PackedVector2Array([Vector2(a, lerpf(arch_top + radius, y, 0.45)),
+					Vector2(b, y - 3.0), _eye(point, angle, length)]))
+		var center := Vector2(a, arch_top + radius)
+		# Both strands straight down from the arch, closing in only just above the hole (or eye).
+		var left := PackedVector2Array([center + Vector2(-radius, 0.0)])
+		var right := PackedVector2Array([center + Vector2(radius, 0.0)])
+		if strands_to.y - center.y > 8.0:
+			left.append(Vector2(a - radius, strands_to.y - 5.0))
+			right.append(Vector2(a + radius, strands_to.y - 5.0))
+		left.append(strands_to + Vector2(-1.5, 0.0))
+		right.append(strands_to + Vector2(1.5, 0.0))
+		draw_arc(center, radius, PI, TAU, 16, ink, 2.0)
+		draw_polyline(right, ink, 2.0)
+		if not through:
+			draw_polyline(left, ink, 2.0)
 		for thread in threads:
 			draw_polyline(thread, ink, 2.0)
 		_draw_needle(point - Vector2.from_angle(angle) * length, angle, length, ink)
 		if through:
-			# The loop's near half over the needle.
-			draw_arc(loop, radius, PI / 2.0, PI * 1.5, 12, Color(GAP_COLOR, ink.a), 5.0)
-			draw_arc(loop, radius, PI / 2.0, PI * 1.5, 12, ink, 2.0)
+			# The near strand over the needle, the far one under it.
+			draw_polyline(left, Color(GAP_COLOR, ink.a), 5.0)
+			draw_polyline(left, ink, 2.0)
 
 
 	## Where the eye is of a needle `length` long whose point is at `point`, pointing along `angle`.
