@@ -5,7 +5,7 @@ extends Control
 ##
 ## Command line (after `--`): `--projects-dir=<path>` keeps projects in another folder (for test
 ## runs), `--open=<path>` opens an image as a new project, `--max-skip=<n>` sets the skip limit
-## (-1: none), `--start=<corner>` sets the start corner (top-left, top-right, bottom-left,
+## (-1: none), `--start=<corner>` sets the start corner (auto, top-left, top-right, bottom-left,
 ## bottom-right), `--settings` opens the settings dialog (`--advanced`: with the advanced part open),
 ## `--method=<english|danish>` sets the stitch method, `--back-pass=<whole|blocks>` the Danish
 ## return pass, `--max-block=<n>` the most stitches per block, `--needle=<auto|bottom|top>` and
@@ -35,12 +35,13 @@ const STITCH_CELL_PX := 24.0
 ## Starting light for the test sliders: from the top left, 40° above the fabric.
 const LIGHT_AZIMUTH := 315.0
 const LIGHT_ELEVATION := 40.0
-## Start corners in the settings: label and (top_to_bottom, start_left).
+## Start corners in the settings: label and (top_to_bottom, start_left, auto).
 const START_CORNERS := [
-	["Oben links: Reihen nach rechts, dann nach unten", true, true],
-	["Oben rechts: Reihen nach links, dann nach unten", true, false],
-	["Unten links: Reihen nach rechts, dann nach oben", false, true],
-	["Unten rechts: Reihen nach links, dann nach oben", false, false],
+	["Automatisch: wo der Faden auf der Rückseite am kürzesten bleibt (empfohlen)", true, true, true],
+	["Oben links: Reihen nach rechts, dann nach unten", true, true, false],
+	["Oben rechts: Reihen nach links, dann nach unten", true, false, false],
+	["Unten links: Reihen nach rechts, dann nach oben", false, true, false],
+	["Unten rechts: Reihen nach links, dann nach oben", false, false, false],
 ]
 const METHODS := [
 	"Dänisch: erst die Halbstiche einer Reihe, dann zurück die Gegenstiche",
@@ -577,7 +578,8 @@ func _build_settings_dialog() -> void:
 	var corner_note := Label.new()
 	corner_note.text = ("Fläche für Fläche: Die Ecke bestimmt, wo es losgeht und welcher Abschnitt\n"
 			+ "bei gleichem Abstand zuerst kommt. Eine Reihe beginnt trotzdem am näheren Ende,\n"
-			+ "wenn der Faden dort schon ist.")
+			+ "wenn der Faden dort schon ist. Automatisch probiert jede Farbe in allen vier Ecken\n"
+			+ "und nimmt die, bei der am wenigsten Faden hinten weiterläuft oder neu nötig ist.")
 	corner_note.modulate.a = 0.7
 	content.add_child(corner_note)
 	content.add_child(HSeparator.new())
@@ -825,7 +827,8 @@ func _show_settings() -> void:
 	_limit_spin.editable = _limit_box.button_pressed
 	if limit != StitchPlanner.UNLIMITED:
 		_limit_spin.value = limit
-	_corner_option.selected = _corner_index(Preferences.top_to_bottom(), Preferences.start_left())
+	_corner_option.selected = _corner_index(Preferences.top_to_bottom(), Preferences.start_left(),
+			Preferences.auto_start())
 	_method_option.selected = 1 if Preferences.english() else 0
 	_whole_back_box.button_pressed = Preferences.whole_back()
 	_whole_back_box.disabled = Preferences.english()
@@ -837,9 +840,11 @@ func _show_settings() -> void:
 	_settings_dialog.popup_centered()
 
 
-## Index into START_CORNERS of a row order and start side.
-static func _corner_index(top_to_bottom: bool, start_left: bool) -> int:
-	return (0 if top_to_bottom else 2) + (0 if start_left else 1)
+## Index into START_CORNERS of a row order and start side, or of the automatic choice.
+static func _corner_index(top_to_bottom: bool, start_left: bool, auto: bool) -> int:
+	if auto:
+		return 0
+	return 1 + (0 if top_to_bottom else 2) + (0 if start_left else 1)
 
 
 ## Stores the preferences and replans the open project; stitched cells stay stitched.
@@ -850,7 +855,7 @@ func _apply_settings() -> void:
 	var limit := int(_limit_spin.value) if _limit_box.button_pressed else StitchPlanner.UNLIMITED
 	Preferences.set_max_skip(limit)
 	var corner: Array = START_CORNERS[_corner_option.selected]
-	Preferences.set_direction(corner[1], corner[2])
+	Preferences.set_direction(corner[1], corner[2], corner[3])
 	Preferences.set_english(_method_option.selected == 1)
 	Preferences.set_whole_back(_whole_back_box.button_pressed)
 	Preferences.set_max_block(int(_block_spin.value))
@@ -870,7 +875,8 @@ func _apply_settings() -> void:
 ## Replans the open project for the current preferences; stitched cells stay stitched.
 func _apply_preferences() -> void:
 	_project.session.set_max_skip(Preferences.max_skip())
-	_project.session.set_direction(Preferences.top_to_bottom(), Preferences.start_left())
+	_project.session.set_direction(Preferences.top_to_bottom(), Preferences.start_left(),
+			Preferences.auto_start())
 	_project.session.set_english(Preferences.english())
 	_project.session.set_whole_back(Preferences.whole_back())
 	_project.session.set_max_block(Preferences.max_block())
@@ -1319,7 +1325,8 @@ func _handle_cmdline() -> void:
 				_apply_preferences()
 		elif arg.begins_with("--start="):
 			var corner := arg.trim_prefix("--start=")
-			Preferences.set_direction(not corner.begins_with("bottom"), not corner.ends_with("right"))
+			Preferences.set_direction(not corner.begins_with("bottom"), not corner.ends_with("right"),
+					corner == "auto")
 			if _project != null:
 				_apply_preferences()
 		elif arg.begins_with("--ui="):

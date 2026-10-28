@@ -71,6 +71,7 @@ func replace_color(old_code: String, new_code: String, palette: FlossPalette) ->
 	session = StitchSession.new(pattern)
 	session.top_to_bottom = old_session.top_to_bottom
 	session.start_left = old_session.start_left
+	session.auto_start = old_session.auto_start
 	session.max_skip = old_session.max_skip
 	session.english = old_session.english
 	session.whole_back = old_session.whole_back

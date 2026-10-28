@@ -26,6 +26,10 @@ var pattern: Pattern
 ## Row order and start side (the start corner). Change them with set_direction(), which replans.
 var top_to_bottom := true
 var start_left := true
+## Whether each thread starts in whichever corner leaves the least thread on the back
+## (StitchPlanner.plan_shortest()) instead of top_to_bottom and start_left. Changed with
+## set_direction() too. Not saved with the project; it comes from the preferences.
+var auto_start := false
 ## Most cells the thread may skip on the back (StitchPlanner.UNLIMITED: no automatic changes).
 ## Change it with set_max_skip(), which replans.
 var max_skip := StitchPlanner.UNLIMITED
@@ -54,8 +58,12 @@ func _init(p_pattern: Pattern) -> void:
 
 func steps(thread: int) -> Array[StitchStep]:
 	if not _plans.has(thread):
-		_plans[thread] = StitchPlanner.plan(pattern, thread, top_to_bottom, start_left, max_skip, english,
-				whole_back, max_block)
+		if auto_start:
+			_plans[thread] = StitchPlanner.plan_shortest(pattern, thread, max_skip, english, whole_back,
+					max_block)
+		else:
+			_plans[thread] = StitchPlanner.plan(pattern, thread, top_to_bottom, start_left, max_skip,
+					english, whole_back, max_block)
 	return _plans[thread]
 
 
@@ -113,13 +121,15 @@ func set_max_skip(value: int) -> void:
 	_replan(states)
 
 
-## Changes the start corner and replans every thread, keeping progress like set_max_skip().
-func set_direction(p_top_to_bottom: bool, p_start_left: bool) -> void:
-	if p_top_to_bottom == top_to_bottom and p_start_left == start_left:
+## Changes the start corner (or `auto` for the shortest thread) and replans every thread,
+## keeping progress like set_max_skip().
+func set_direction(p_top_to_bottom: bool, p_start_left: bool, auto := false) -> void:
+	if p_top_to_bottom == top_to_bottom and p_start_left == start_left and auto == auto_start:
 		return
 	var states := cell_states()
 	top_to_bottom = p_top_to_bottom
 	start_left = p_start_left
+	auto_start = auto
 	_replan(states)
 
 

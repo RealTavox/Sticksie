@@ -15,6 +15,7 @@ func _initialize() -> void:
 	_test_planner_rows()
 	_test_planner_order()
 	_test_start_corner()
+	_test_shortest_start()
 	_test_planner_covers_sample()
 	_test_session()
 	_test_position_hint()
@@ -230,15 +231,43 @@ func _test_start_corner() -> void:
 
 	var previous_directory := ProjectStore.directory
 	ProjectStore.directory = "user://test_preferences"
-	_check(Preferences.top_to_bottom() and Preferences.start_left(), "default corner top left")
+	_check(Preferences.auto_start(), "default start corner is automatic")
 	Preferences.set_direction(false, false)
-	_check(not Preferences.top_to_bottom() and not Preferences.start_left(), "corner preference stored")
+	_check(not Preferences.top_to_bottom() and not Preferences.start_left() and not Preferences.auto_start(),
+			"corner preference stored")
 	DirAccess.remove_absolute(Preferences.path())
 	DirAccess.remove_absolute(ProjectStore.directory)
 	ProjectStore.directory = previous_directory
 
 
 ## Every cell of a thread is stitched exactly once as a whole cross, in blocks of at most 5.
+func _test_shortest_start() -> void:
+	# Scattered stitches: starting top left leaves the thread jumping back and forth more than
+	# the best corner does.
+	var pattern := _pattern(["...0..", ".000.0", ".....0", "...0.0"])
+	var shortest := StitchPlanner.plan_shortest(pattern, 0)
+	var best := StitchPlanner.thread_cost(shortest)
+	for corner in StitchPlanner.CORNERS:
+		var steps := StitchPlanner.plan(pattern, 0, corner.x == 1, corner.y == 1)
+		_check(best <= StitchPlanner.thread_cost(steps), "shortest start beats corner %s" % corner)
+	_check(best < StitchPlanner.thread_cost(StitchPlanner.plan(pattern, 0)),
+			"shortest start is shorter than top left here")
+
+	var session := StitchSession.new(pattern)
+	session.advance(0)
+	var before := session.cell_states()
+	session.set_direction(true, true, true)
+	_check(session.auto_start and session.cell_states() == before, "auto start keeps progress")
+	_check(StitchPlanner.thread_cost(session.steps(0)) == best, "session plans the shortest start")
+
+	var sample := PatternImporter.from_image(load("res://samples/hypsi_anhaenger.png") as Image,
+			FlossPalette.dmc())
+	for thread in sample.thread_codes.size():
+		var auto := StitchPlanner.thread_cost(StitchPlanner.plan_shortest(sample, thread))
+		_check(auto <= StitchPlanner.thread_cost(StitchPlanner.plan(sample, thread)),
+				"sample thread %d: automatic start no longer than top left" % thread)
+
+
 func _test_planner_covers_sample() -> void:
 	var image := load("res://samples/hypsi_anhaenger.png") as Image
 	var pattern := PatternImporter.from_image(image, FlossPalette.dmc())
@@ -305,8 +334,21 @@ func _test_position_hint() -> void:
 	var pattern := _pattern(["000.0", ".....", "..1..", "0...."])
 	var session := StitchSession.new(pattern)
 	var first := session.current_step(0)
-	_check(PositionHint.find(pattern, session.cell_states(), first) == null,
-			"no hint for the very first stitch")
+	var from_corner := PositionHint.find(pattern, session.cell_states(), first)
+	_check(from_corner != null and from_corner.landmark == PositionHint.Landmark.CORNER
+			and from_corner.reference == Vector2i(0, 0) and from_corner.path.is_empty(),
+			"the very first stitch counts from the nearest pattern corner")
+	_check(StitchPanel.describe_position(first, from_corner, pattern, session.cell_states(),
+			StitchStyle.new()).begins_with("Erster Stich: Lege auf dem Stoff fest, wo die Ecke oben links des Musters (5 × 4) liegen soll (Ring). Genau dort anfangen."),
+			"first stitch text names the corner")
+	var lone := _pattern(["....", "....", "...0", "...."])
+	var lone_step := StitchSession.new(lone).current_step(0)
+	var lone_hint := PositionHint.find(lone, PackedByteArray([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), lone_step)
+	_check(lone_hint.reference == Vector2i(3, 3) and lone_hint.offset() == Vector2i(0, -1),
+			"nearest corner is bottom right: %s" % lone_hint.reference)
+	_check(StitchPanel.describe_position(lone_step, lone_hint, lone, PackedByteArray(), StitchStyle.new())
+			.begins_with("Erster Stich: Lege auf dem Stoff fest, wo die Ecke unten rechts des Musters (4 × 4) liegen soll (Ring). Direkt über der Ecke."),
+			"text counts from the bottom right corner")
 
 	session.advance(0)
 	var after_gap := session.current_step(0)

@@ -25,6 +25,40 @@ const DEFAULT_MAX_BLOCK := 5
 const MAX_GAP := 3
 ## Skip limit meaning "no limit": the thread is never changed automatically.
 const UNLIMITED := -1
+## Thread a new thread costs in thread_cost(), in cells: the tails secured at both ends.
+const THREAD_START_COST := 8
+## Start corners as (top_to_bottom, start_left), in the order plan_shortest() prefers on a tie.
+const CORNERS: Array[Vector2i] = [Vector2i(1, 1), Vector2i(1, 0), Vector2i(0, 1), Vector2i(0, 0)]
+
+
+## Like plan(), but tries every start corner and keeps the plan with the least thread on the
+## back (thread_cost()); on a tie the first of CORNERS.
+static func plan_shortest(pattern: Pattern, thread: int, max_skip := UNLIMITED, english := false,
+		whole_back := false, max_block := DEFAULT_MAX_BLOCK) -> Array[StitchStep]:
+	var best: Array[StitchStep] = []
+	var best_cost := INF
+	for corner in CORNERS:
+		var steps := plan(pattern, thread, corner.x == 1, corner.y == 1, max_skip, english,
+				whole_back, max_block)
+		var cost := thread_cost(steps)
+		if cost < best_cost:
+			best = steps
+			best_cost = cost
+	return best
+
+
+## Thread used on the back between the steps, in cells: each way carried over (as the crow
+## flies, from the needle's last stitch to the next first one) or THREAD_START_COST where a new
+## thread starts instead. The stitches themselves cost the same in every order.
+static func thread_cost(steps: Array[StitchStep]) -> float:
+	var cost := 0.0
+	for i in range(1, steps.size()):
+		if steps[i].starts_thread:
+			cost += THREAD_START_COST
+		else:
+			var from := Vector2(steps[i - 1].cells[-1], steps[i - 1].row)
+			cost += from.distance_to(Vector2(steps[i].cells[0], steps[i].row))
+	return cost
 
 
 ## Steps for `thread` (index into pattern.thread_codes), area by area. Each segment starts at its

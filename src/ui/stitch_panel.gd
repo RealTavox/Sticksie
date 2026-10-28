@@ -156,18 +156,21 @@ static func describe_thread(step: StitchStep, thread_start: StitchSession.Thread
 
 
 ## Where the step starts: relative to the reference stitch of `hint` (marked in the picture),
-## over its own half stitches for a return pass, or freely chosen for the very first stitch.
-## `states` are the cell states before the step.
+## over its own half stitches for a return pass, or from a corner of the pattern for the very
+## first stitch. `states` are the cell states before the step.
 static func describe_position(step: StitchStep, hint: PositionHint, pattern: Pattern,
 		states: PackedByteArray, style: StitchStyle) -> String:
 	var text := ""
-	if step.kind == StitchStep.Kind.BACK:
+	if step.kind == StitchStep.Kind.BACK or hint == null:
 		text = "Auf den eigenen Halbstichen zurück."
-	elif hint == null:
-		text = ("Erster Stich: Stelle auf dem Stoff frei wählen. Links davon braucht das Muster "
-				+ "noch %d %s, darüber %d %s (ganzes Muster %d × %d).") % [
-				step.cells[0], "Feld" if step.cells[0] == 1 else "Felder",
-				step.row, "Reihe" if step.row == 1 else "Reihen", pattern.width, pattern.height]
+	elif hint.landmark == PositionHint.Landmark.CORNER:
+		var corner := describe_pattern_corner(hint.reference, pattern)
+		text = "Erster Stich: Lege auf dem Stoff fest, wo die Ecke %s des Musters (%d × %d) liegen soll (Ring). " % [
+				corner, pattern.width, pattern.height]
+		if hint.offset() == Vector2i.ZERO:
+			text += "Genau dort anfangen."
+		else:
+			text += describe_offset(hint.offset(), "der Ecke")
 	else:
 		text = describe_offset(hint.offset(), describe_reference(hint, pattern, states))
 	var corner := describe_corner(step, style)
@@ -191,6 +194,12 @@ static func describe_corner(step: StitchStep, style: StitchStyle) -> String:
 	var hole := style.needle_holes(step)[0]
 	return "%s %s" % ["oben" if int(hole.y) == step.row else "unten",
 			"links" if int(hole.x) == step.cells[0] else "rechts"]
+
+
+## Which corner of `pattern` the cell `corner` is, e.g. "oben links".
+static func describe_pattern_corner(corner: Vector2i, pattern: Pattern) -> String:
+	return "%s %s" % ["oben" if corner.y == 0 or pattern.height == 1 else "unten",
+			"links" if corner.x == 0 else "rechts"]
 
 
 ## The reference stitch in the dative, saying what makes it findable, e.g. "dem markierten Kreuz

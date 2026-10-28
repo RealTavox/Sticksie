@@ -23,10 +23,17 @@ static func start_left() -> bool:
 	return bool(_load().get_value("stitching", "start_left", true))
 
 
-## Sets the start corner: the row order and the start side together.
-static func set_direction(p_top_to_bottom: bool, p_start_left: bool) -> void:
+## Whether the app picks the start corner per thread for the least thread on the back
+## (default) instead of top_to_bottom() and start_left().
+static func auto_start() -> bool:
+	return bool(_load().get_value("stitching", "auto_start", true))
+
+
+## Sets the start corner: the row order and the start side together, or `auto`.
+static func set_direction(p_top_to_bottom: bool, p_start_left: bool, auto := false) -> void:
 	_store("top_to_bottom", p_top_to_bottom)
 	_store("start_left", p_start_left)
+	_store("auto_start", auto)
 
 
 ## Whether crosses are stitched one by one (English) instead of the Danish method (default).

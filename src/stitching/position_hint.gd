@@ -5,7 +5,8 @@ extends RefCounted
 ## of equal stitches can't be found again, so the reference is either the last stitch made or
 ## the end of a run: a stitch whose left or right neighbour is empty or looks different (other
 ## thread, or half stitch next to cross). Of those, the closest wins, preferring a straight line
-## to count along, and on a tie one in the same row.
+## to count along, and on a tie one in the same row. Before the very first stitch, counting
+## starts at the nearest corner of the pattern, which the user places on the fabric.
 
 enum Landmark {
 	## The stitch just made; the needle is there.
@@ -14,6 +15,8 @@ enum Landmark {
 	RIGHT_END,
 	## A stitch on its own: both neighbours differ.
 	SINGLE,
+	## Nothing is stitched yet: a corner cell of the pattern, wherever the user puts it.
+	CORNER,
 }
 
 ## The stitched cell to count from.
@@ -29,7 +32,8 @@ var path: Array[Vector2i] = []
 
 ## The hint for `step`, given the cell states (StitchSession.Cell per cell) before it and the
 ## last stitched cell of its thread ((-1, -1) if none). Null for a return pass (it runs back
-## over its own half stitches) and when nothing is stitched yet.
+## over its own half stitches). When nothing is stitched yet, the reference is the corner of the
+## pattern nearest to the step (on a tie: top before bottom, left before right).
 static func find(pattern: Pattern, states: PackedByteArray, step: StitchStep,
 		last_cell := Vector2i(-1, -1)) -> PositionHint:
 	if step.kind == StitchStep.Kind.BACK:
@@ -67,7 +71,9 @@ static func find(pattern: Pattern, states: PackedByteArray, step: StitchStep,
 				best = cell
 				best_landmark = landmark
 	if best.x < 0:
-		return null
+		best = Vector2i(0 if target.x * 2 <= pattern.width - 1 else pattern.width - 1,
+				0 if target.y * 2 <= pattern.height - 1 else pattern.height - 1)
+		best_landmark = Landmark.CORNER
 	var hint := PositionHint.new()
 	hint.reference = best
 	hint.landmark = best_landmark
