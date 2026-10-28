@@ -243,6 +243,14 @@ func finished_crosses(thread: int) -> int:
 	return count
 
 
+## Whether every colour is finished.
+func is_finished() -> bool:
+	for thread in pattern.thread_codes.size():
+		if current_step(thread) != null:
+			return false
+	return true
+
+
 ## Share of the legs stitched, 0..1: of `thread`, or of every thread with -1. A half stitch is
 ## one leg of the two of a cross, so every step moves it on.
 func leg_progress(thread := -1) -> float:

@@ -12,7 +12,7 @@ extends Control
 ## `--first-leg=<slash|backslash>` the stitch style (bottom/top/first-leg fix it), `--projects` the project list, `--stitch=<code>` starts stitching that thread, `--steps=<n>` confirms n steps, `--back` shows the back while stitching, `--screenshot=<png path>` saves a screenshot after a few
 ## frames and quits (`--wait=<seconds>` waits that much longer, e.g. into an animation).
 ## `--finish` stitches the rest of the `--stitch` colour (the celebration comes in),
-## `--dismiss` then taps it away to the overview. `--ui=<touch|desktop>` sets the layout, `--overlays=<menu,pin,list,text>`
+## `--dismiss` then taps it away to the overview. `--finale` shows the show for a finished project. `--ui=<touch|desktop>` sets the layout, `--overlays=<menu,pin,list,text>`
 ## opens touch overlays (pin: the menu pinned), `--tooltip=<menu|list|text>` shows a round
 ## button's tooltip, `--safe-area=<left>,<top>,<right>,<bottom>` pretends the screen has a notch
 ## or island (canvas pixels), `--picker=<code>` opens the colour picker for that colour of the
@@ -39,6 +39,10 @@ const STITCH_CELL_PX := 24.0
 ## Starting light for the test sliders: from the top left, 40° above the fabric.
 const LIGHT_AZIMUTH := 315.0
 const LIGHT_ELEVATION := 40.0
+## After each step the light swings once around the fabric, as a little reward; during a
+## celebration it keeps going round.
+const LIGHT_SPIN_SECONDS := 0.9
+const LIGHT_LOOP_SECONDS := 2.4
 ## Start corners in the settings: label and (top_to_bottom, start_left, auto).
 const START_CORNERS := [
 	["Automatisch: wo der Faden auf der Rückseite am kürzesten bleibt (empfohlen)", true, true, true],
@@ -162,6 +166,15 @@ var _file_dialog: FileDialog
 ## Progress of the colour being stitched, or of the whole project in the overview.
 var _progress: ProgressStrip
 var _celebration: Celebration
+var _finale: Finale
+## Degrees the light is turned on top of the test slider, while it spins.
+var _light_spin := 0.0:
+	set(value):
+		_light_spin = value
+		_apply_light()
+var _light_tween: Tween
+## Whether the light keeps going round (celebrations).
+var _light_looping := false
 ## When stitching began: the whole project's progress and whether the colour was finished, for
 ## the overview's show on the way back.
 var _overall_before := 0.0
@@ -549,9 +562,40 @@ func _make_light_slider(from: float, to: float, value: float) -> HSlider:
 
 
 func _apply_light() -> void:
-	_view.set_light(_light_azimuth.value, _light_elevation.value)
+	var azimuth := fposmod(_light_azimuth.value + _light_spin, 360.0)
+	_view.set_light(azimuth, _light_elevation.value)
 	for button: RoundButton in [_menu_button, _list_button, _text_button, _menu_pin]:
-		button.set_light(_light_azimuth.value, _light_elevation.value)
+		button.set_light(azimuth, _light_elevation.value)
+
+
+## Swings the light once around the fabric (unless it is going round anyway).
+func _spin_light() -> void:
+	if _light_looping:
+		return
+	if _light_tween != null:
+		_light_tween.kill()
+	_light_spin = 0.0
+	_light_tween = create_tween()
+	_light_tween.tween_property(self, "_light_spin", 360.0, LIGHT_SPIN_SECONDS).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_IN_OUT)
+	_light_tween.tween_callback(func() -> void: _light_spin = 0.0)
+
+
+## Keeps the light going round (`on`) or lets it finish its turn and stop.
+func _loop_light(on: bool) -> void:
+	if on == _light_looping:
+		return
+	_light_looping = on
+	if _light_tween != null:
+		_light_tween.kill()
+	_light_tween = create_tween()
+	if on:
+		var start := fposmod(_light_spin, 360.0)
+		_light_tween.set_loops()
+		_light_tween.tween_property(self, "_light_spin", start + 360.0, LIGHT_LOOP_SECONDS).from(start)
+		return
+	_light_spin = fposmod(_light_spin, 360.0)
+	_light_tween.tween_property(self, "_light_spin", 360.0, LIGHT_LOOP_SECONDS * (1.0 - _light_spin / 360.0)).set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_SINE)
+	_light_tween.tween_callback(func() -> void: _light_spin = 0.0)
 
 
 func _build_settings_dialog() -> void:
@@ -1198,6 +1242,7 @@ func _leave_stitching() -> void:
 	if _celebration != null:
 		_celebration.queue_free()
 		_celebration = null
+		_loop_light(false)
 	_stitch_thread = -1
 	_shown_step = null
 	_update_visibility()
@@ -1223,8 +1268,45 @@ func _show_overall_progress() -> void:
 		await _progress.fill_finished
 	var strike: StrikeLine = _strikes.get(_strike_code)
 	_strike_code = ""
-	if strike != null and is_instance_valid(strike) and _stitch_thread < 0:
-		strike.strike()
+	if strike == null or not is_instance_valid(strike) or _stitch_thread >= 0:
+		return
+	var struck := strike.strike()
+	if _project.session.is_finished():
+		await struck.finished
+		if _stitch_thread < 0:
+			_show_finale()
+
+
+## The whole project is stitched: the big show, ending in a choice of what to do next.
+func _show_finale() -> void:
+	if _finale != null or _project == null:
+		return
+	if _touch:
+		for entry in [[_menu_panel, _menu_button], [_list_panel, _list_button], [_text_panel, _text_button]]:
+			_set_overlay(entry[0], entry[1], false, false)
+		_view.set_covered(Finale.covered_top(size), Finale.covered_bottom())
+	_view.fit_to_view()
+	_finale = Finale.new()
+	add_child(_finale)
+	_finale.chosen.connect(_on_finale_chosen)
+	_loop_light(true)
+	_finale.play(_project.name, _project.pattern.total_stitches(), _project.pattern.thread_codes.size(),
+			_view.pattern_rect())
+
+
+## After the finale: back to the overview, or on to a new image or another project.
+func _on_finale_chosen(choice: Finale.Choice) -> void:
+	_finale = null
+	_loop_light(false)
+	_update_cover()
+	match choice:
+		Finale.Choice.OVERVIEW:
+			_open_overview_panels()
+			_view.fit_to_view()
+		Finale.Choice.NEW_PROJECT:
+			_file_dialog.popup_centered_ratio(0.8)
+		Finale.Choice.OPEN_PROJECT:
+			_show_projects()
 
 
 ## The bar shows the colour being stitched (in the colour of its block) or the whole project (in
@@ -1257,7 +1339,9 @@ func _celebrate() -> void:
 	add_child(_celebration)
 	_celebration.dismissed.connect(func() -> void:
 		_celebration = null
+		_loop_light(false)
 		_leave_stitching())
+	_loop_light(true)
 	_celebration.play(_palette.find_code(_project.pattern.thread_codes[thread]),
 			_project.pattern.stitch_counts()[thread], _progress.color, _progress.bar_rect())
 
@@ -1342,6 +1426,7 @@ func _next_step() -> void:
 		_refresh_stitching()
 		_save()
 		_update_progress(true)
+		_spin_light()
 		if _project.session.current_step(_stitch_thread) == null:
 			_celebrate()
 
@@ -1378,6 +1463,7 @@ func _handle_cmdline() -> void:
 	var pick_code := ""
 	var picker_view := PackedStringArray()
 	var finish := false
+	var finale := false
 	var dismiss := false
 	var wait := 0.0
 	for arg in OS.get_cmdline_user_args():
@@ -1415,6 +1501,8 @@ func _handle_cmdline() -> void:
 			back = true
 		elif arg == "--finish":
 			finish = true
+		elif arg == "--finale":
+			finale = true
 		elif arg == "--dismiss":
 			dismiss = true
 		elif arg.begins_with("--wait="):
@@ -1508,6 +1596,9 @@ func _handle_cmdline() -> void:
 			_picker.choose(pick_code)
 			while _picker.is_animating():
 				await get_tree().process_frame
+	if finale and _project != null:
+		await get_tree().process_frame
+		_show_finale()
 	if screenshot_path.is_empty():
 		return
 	while not _overlay_moving.is_empty() or _view.is_panning():

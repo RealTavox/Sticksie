@@ -310,6 +310,13 @@ func fit_to_view() -> void:
 	queue_redraw()
 
 
+## Where the whole pattern is on screen (global).
+func pattern_rect() -> Rect2:
+	if pattern == null:
+		return Rect2()
+	return Rect2(global_position + _origin, Vector2(pattern.width, pattern.height) * _cell_px)
+
+
 ## Zooms in to at least `min_cell_px` (if the screen allows) and centres `step`.
 func focus_step(step: StitchStep, min_cell_px: float) -> void:
 	if not _is_laid_out():

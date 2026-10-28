@@ -70,7 +70,12 @@ item is resolved during normal work, delete its entry in the same change.
   `Celebration` the full-screen show when a colour is finished (dimmed screen, the bar flies to
   the middle and glows, CPUParticles2D confetti and sparkles, congratulation; a tap goes to the
   overview, whose bar then fills from where the project was when stitching began, and the colour
-  is struck through in the list by `StrikeLine`; finished colours stay struck through),
+  is struck through in the list by `StrikeLine`; finished colours stay struck through; when that
+  was the last colour, `Finale` follows: flash and screen shake, darkness around the pattern
+  with turning golden rays (`finale.gdshader`), "MEISTERWERK!" letter by letter, fireworks,
+  confetti, a count-up and a rainbow bar, then buttons: overview, new project (file dialog),
+  open project (project list)); after every step the test light swings once around
+  (`main.gd` `_spin_light()`), during both shows it keeps turning (`_loop_light()`),
   `SkeinSwatch` a thread colour drawn as a square of the pure
   colour with a loop of thread coming out of it (one colourless template image per shape,
   tinted by `skein.gdshader`, so it fades as one; tapping it opens the colour picker),
@@ -116,7 +121,7 @@ How to check a change; every fix and feature runs these. Godot binary:
    (both fix the style), `--advanced` with `--settings` for the advanced part, `--ui=<touch|desktop>` the layout,
    `--overlays=<menu,pin,list,text>` opens touch overlays, `--picker=<code>` the colour picker
    for a colour of the list, `--picker-view=<list,project>` its list view and/or project filter, `--pick=<code>` chooses a colour in it, `--tooltip=<menu|list|text>` shows a
-   round button's tooltip, `--safe-area=<l>,<t>,<r>,<b>` fakes a notch or island (canvas px), `--finish` stitches the rest of the `--stitch` colour (the celebration comes in), `--dismiss` taps it away to the overview, `--wait=<seconds>` waits that long before the screenshot (e.g. into the bar's fill; otherwise screenshots wait for the fill), `--zoom=<cell px>`
+   round button's tooltip, `--safe-area=<l>,<t>,<r>,<b>` fakes a notch or island (canvas px), `--finish` stitches the rest of the `--stitch` colour (the celebration comes in), `--dismiss` taps it away to the overview, `--finale` shows the finished-project show, `--wait=<seconds>` waits that long before the screenshot (e.g. into the bar's fill; otherwise screenshots wait for the fill), `--zoom=<cell px>`
    to zoom in on the current step, `--light=<azimuth>,<elevation>` (degrees; azimuth clockwise
    from the top) for the test light, `--flip=<0..1>` with `--back` to hold the flip animation
    at that point. Screenshots wait for a running flip to end. In zsh, pass each user
