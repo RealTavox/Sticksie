@@ -55,7 +55,13 @@ item is resolved during normal work, delete its entry in the same change.
   them in and out (panels stacked in the dock move along as one), then the view glides the
   current step clear of them; the overview opens the
   colour list and info by itself), `SkeinSwatch` a thread colour drawn as a square of the pure
-  colour with a loop of thread coming out of it (colour list rows; "Auslassen" fades the whole row),
+  colour with a loop of thread coming out of it (one colourless template image per shape,
+  tinted by `skein.gdshader`, so it fades as one; tapping it opens the colour picker),
+  `ThreadPicker`/`ThreadGrid` the colour picker that swipes in over the colour list: every DMC
+  colour as skeins on stairs (loop up, square lengthened by the loop), greys first then by hue,
+  rows light to dark; or as a list with number and name, and/or only the project's colours
+  moved together, every skein gliding to its new place or fading out; choosing one shrinks the others away, then "Ersetzen" calls
+  `StitchProject.replace_color()` (colour list rows; "Auslassen" fades the whole row),
   `tests/run_tests.gd`, plus `project.godot` and the `*.import` files next to resources (they
   hold import settings: `data/threads/dmc-floss.csv` uses the "keep" importer so it isn't
   turned into a translation, `samples/*.png` use the "image" importer so `load()` returns an
@@ -90,7 +96,8 @@ How to check a change; every fix and feature runs these. Godot binary:
    skip limit (-1: none), `--start=<top-left|top-right|bottom-left|bottom-right>` the start corner, `--settings` to open the settings dialog, `--projects` the project list, `--back` the back side while stitching,
    `--method=<danish|english>`, `--back-pass=<whole|blocks>`, `--max-block=<n>`, `--needle=<auto|bottom|top>`, `--first-leg=<slash|backslash>`
    (both fix the style), `--advanced` with `--settings` for the advanced part, `--ui=<touch|desktop>` the layout,
-   `--overlays=<menu,pin,list,text>` opens touch overlays, `--tooltip=<menu|list|text>` shows a
+   `--overlays=<menu,pin,list,text>` opens touch overlays, `--picker=<code>` the colour picker
+   for a colour of the list, `--picker-view=<list,project>` its list view and/or project filter, `--pick=<code>` chooses a colour in it, `--tooltip=<menu|list|text>` shows a
    round button's tooltip, `--safe-area=<l>,<t>,<r>,<b>` fakes a notch or island (canvas px), `--zoom=<cell px>`
    to zoom in on the current step, `--light=<azimuth>,<elevation>` (degrees; azimuth clockwise
    from the top) for the test light, `--flip=<0..1>` with `--back` to hold the flip animation
@@ -105,12 +112,14 @@ device or in the editor and say so in the report. Resuming: run once with `--ope
 
 ### Save format
 
-`StitchProject.to_dict()`, one JSON file per project, `format` 2 (2 added `progress.max_skip`
-and `progress.manual_thread_starts`; format 1 files load with no limit and no manual changes). It holds the image (PNG,
+`StitchProject.to_dict()`, one JSON file per project, `format` 3 (2 added `progress.max_skip`
+and `progress.manual_thread_starts`; format 1 files load with no limit and no manual changes;
+3 added `color_replacements`, matched code -> code the user chose, applied by the importer on
+every rebuild; older files load with none). It holds the image (PNG,
 base64), fabric codes, the pattern itself (so palette or matching changes can't alter a pattern
 being stitched) and progress as cell states; a step counts as done when the cells already show
-it (`StitchSession.restore()`), so any plan order works; a step whose first cells show it and
-the rest not is split there in the plan, so a longer step after replanning loses no stitches. `done_steps` per thread code is only
+it (`StitchSession.restore()`), so any plan order works; a step with stitched and unstitched cells is
+split where they meet, so a longer step after replanning or two merged colours lose no stitches. `done_steps` per thread code is only
 informational. Changing the format needs the user's OK and a new
 `format` number with a migration for older files.
 

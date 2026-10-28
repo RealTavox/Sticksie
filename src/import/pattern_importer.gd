@@ -6,9 +6,10 @@ const MIN_ALPHA := 0.5
 
 
 ## Threads whose code is in `fabric_codes` are left out; their cells stay empty fabric.
+## `replacements` maps a matched thread code to the one the user chose instead.
 ## Image colours that map to the same thread become one thread.
 static func from_image(image: Image, palette: FlossPalette,
-		fabric_codes := PackedStringArray()) -> Pattern:
+		fabric_codes := PackedStringArray(), replacements := {}) -> Pattern:
 	if image.is_compressed():
 		image = image.duplicate()
 		image.decompress()
@@ -27,6 +28,8 @@ static func from_image(image: Image, palette: FlossPalette,
 				var floss: FlossColor = floss_by_color.get(color)
 				if floss == null:
 					floss = palette.nearest(color)
+					if replacements.has(floss.code):
+						floss = palette.find_code(replacements[floss.code])
 					floss_by_color[color] = floss
 				if not fabric_codes.has(floss.code):
 					index = index_by_code.get(floss.code, Pattern.EMPTY)

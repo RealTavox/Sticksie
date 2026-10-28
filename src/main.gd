@@ -13,7 +13,9 @@ extends Control
 ## frames and quits. `--ui=<touch|desktop>` sets the layout, `--overlays=<menu,pin,list,text>`
 ## opens touch overlays (pin: the menu pinned), `--tooltip=<menu|list|text>` shows a round
 ## button's tooltip, `--safe-area=<left>,<top>,<right>,<bottom>` pretends the screen has a notch
-## or island (canvas pixels).
+## or island (canvas pixels), `--picker=<code>` opens the colour picker for that colour of the
+## list, `--picker-view=<list,project>` shows it as a list and/or only the project's colours,
+## and `--pick=<code>` chooses a colour in it.
 ##
 ## Two layouts (Preferences.touch_mode()): desktop has a toolbar on top and a side panel; touch
 ## shows the pattern on the whole screen with three round buttons: the menu (the toolbar,
@@ -70,6 +72,8 @@ const DOCK_SLIDE_PX := 24.0
 const MENU_OPEN_SECONDS := 0.18
 const DOCK_OPEN_SECONDS := 0.2
 const OVERLAY_CLOSE_SECONDS := 0.12
+## Swapping the colour list for the colour picker and back.
+const PICKER_SWIPE_SECONDS := 0.35
 ## After a touch closed the menu, taps within this time only closed it.
 const CLOSE_SWALLOW_MSEC := 700
 
@@ -142,6 +146,11 @@ var _view: PatternView
 var _light_azimuth: HSlider
 var _light_elevation: HSlider
 var _side: VBoxContainer
+## Holds the colour list (_side) and the colour picker, which swipe past each other.
+var _list_host: Control
+var _picker: ThreadPicker
+var _picker_open := false
+var _picker_tween: Tween
 var _color_list: VBoxContainer
 var _stitch_panel: StitchPanel
 var _file_dialog: FileDialog
@@ -223,6 +232,16 @@ func _build_ui() -> void:
 	credit.add_theme_font_size_override("font_size", 12)
 	credit.modulate.a = 0.6
 	_side.add_child(credit)
+	_list_host = Control.new()
+	_list_host.clip_contents = true
+	_list_host.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_list_host.resized.connect(_fit_list_host)
+	_list_host.add_child(_side)
+	_picker = ThreadPicker.new()
+	_picker.visible = false
+	_picker.confirmed.connect(_close_picker)
+	_picker.cancelled.connect(_close_picker.bind("", ""))
+	_list_host.add_child(_picker)
 
 	_stitch_panel = StitchPanel.new()
 	_stitch_panel.visible = false
@@ -416,6 +435,7 @@ func _close_menu_unless_pinned() -> bool:
 
 ## Moves the shared widgets into the desktop or the touch layout (Preferences.touch_mode()).
 func _apply_ui_mode() -> void:
+	_close_picker_now()
 	_touch = Preferences.touch_mode()
 	_desktop_root.visible = not _touch
 	_touch_root.visible = _touch
@@ -430,7 +450,7 @@ func _apply_ui_mode() -> void:
 		_place(_light_row, _menu_content, 1)
 		_place(_info_label, _text_content, 0)
 		_place(_stitch_panel.info, _text_content, 1)
-		_place(_side, _list_content, 0)
+		_place(_list_host, _list_content, 0)
 		_place(_stitch_panel.controls, _list_content, 1)
 		if _project == null:
 			_set_overlay(_menu_panel, _menu_button, true)
@@ -439,7 +459,7 @@ func _apply_ui_mode() -> void:
 		_place(_info_label, _toolbar)
 		_place(_light_row, _desktop_column, 1)
 		_place(_view, _body, 0)
-		_place(_side, _body, 1)
+		_place(_list_host, _body, 1)
 		_place(_stitch_panel.info, _stitch_panel, 0)
 		_place(_stitch_panel.controls, _stitch_panel, 1)
 	_update_visibility()
@@ -463,7 +483,7 @@ func _update_visibility() -> void:
 	_projects_button.visible = not stitching
 	_overview_button.visible = stitching
 	_side_button.visible = stitching
-	_side.visible = not stitching
+	_list_host.visible = not stitching
 	_stitch_panel.visible = stitching and not _touch
 	_info_label.visible = not (stitching and _touch)
 	_stitch_panel.info.visible = stitching or not _touch
@@ -659,7 +679,7 @@ func _update_layout() -> void:
 	var portrait := size.y > size.x
 	_body.vertical = portrait
 	var side_size := Vector2(0.0, size.y * 0.38) if portrait else Vector2(minf(560.0, size.x * 0.4), 0.0)
-	_side.custom_minimum_size = side_size
+	_list_host.custom_minimum_size = side_size
 	_stitch_panel.custom_minimum_size = side_size
 
 
@@ -698,7 +718,7 @@ func _layout_touch() -> void:
 	_dock.move_child(_text_panel, 0 if portrait else 2)
 	_dock.move_child(_list_panel, 2 if portrait else 0)
 	var room := bottom_row - _safe.y - TOUCH_MARGIN * 2.0
-	_side.custom_minimum_size = Vector2(0.0, room * (0.45 if portrait else 0.75))
+	_list_host.custom_minimum_size = Vector2(0.0, room * (0.45 if portrait else 0.75))
 	_update_cover.call_deferred()
 
 
@@ -873,6 +893,7 @@ func _open_project(path: String) -> void:
 
 
 func _set_project(project: StitchProject) -> void:
+	_close_picker_now()
 	_leave_stitching()
 	_close_menu_unless_pinned()
 	_project = project
@@ -922,6 +943,7 @@ func _on_project_renamed(path: String, new_name: String) -> void:
 
 ## The project list deleted a file; if it was the open project, the screen goes back to empty.
 func _on_project_deleted(path: String) -> void:
+	_close_picker_now()
 	if _project == null or _project.path != path:
 		return
 	_leave_stitching()
@@ -950,7 +972,10 @@ func _make_color_row(floss: FlossColor, count: int) -> Control:
 	var thread := _project.pattern.thread_codes.find(floss.code)
 	var row := HBoxContainer.new()
 	var left_out := _project.fabric_codes.has(floss.code)
-	row.add_child(SkeinSwatch.new(floss.color))
+	var swatch := SkeinSwatch.new(floss.color)
+	swatch.clickable = true
+	swatch.tooltip_text = "Farbe ersetzen"
+	row.add_child(swatch)
 	var code_label := Label.new()
 	code_label.text = floss.code
 	code_label.custom_minimum_size.x = 56.0
@@ -962,6 +987,7 @@ func _make_color_row(floss: FlossColor, count: int) -> Control:
 	name_label.clip_text = true
 	name_label.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	row.add_child(name_label)
+	swatch.pressed.connect(_open_picker.bind(floss, swatch, name_label))
 	var count_label := Label.new()
 	count_label.text = str(count)
 	if thread >= 0 and session.done_count(thread) > 0:
@@ -1001,6 +1027,100 @@ func _make_color_row(floss: FlossColor, count: int) -> Control:
 	return row
 
 
+## Keeps the colour list and the picker as big as their host; only their x moves when they swipe.
+func _fit_list_host() -> void:
+	for child: Control in [_side, _picker]:
+		child.position.y = 0.0
+		child.size = _list_host.size
+
+
+## Turns the colour list into the colour picker: the list swipes out to the right, the picker
+## comes in from the left, and the tapped colour and its name fly up into the picker's header,
+## growing a little.
+func _open_picker(floss: FlossColor, swatch: Control, name_label: Control) -> void:
+	if _picker_open or _project == null:
+		return
+	_picker_open = true
+	_picker.open(floss, _palette, _full_pattern.thread_codes)
+	var width := _list_host.size.x
+	_picker.position.x = -width
+	_picker.visible = true
+	_picker.header_swatch.modulate.a = 0.0
+	_picker.header_name.modulate.a = 0.0
+	var name_flyer := Label.new()
+	name_flyer.text = floss.name
+	var flyers: Array[Control] = [SkeinSwatch.new(floss.color), name_flyer]
+	var parts: Array[Control] = [swatch, name_label]
+	for i in flyers.size():
+		flyers[i].top_level = true
+		flyers[i].mouse_filter = Control.MOUSE_FILTER_IGNORE
+		add_child(flyers[i])
+		flyers[i].global_position = parts[i].global_position
+		parts[i].modulate.a = 0.0
+	await get_tree().process_frame  # The picker lays out its header first.
+	if not _picker_open:
+		for flyer in flyers:
+			flyer.queue_free()
+		return
+	var offset := _list_host.global_position - _picker.global_position
+	_picker_tween = create_tween().set_parallel().set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_IN_OUT)
+	_picker_tween.tween_property(_side, "position:x", width, PICKER_SWIPE_SECONDS)
+	_picker_tween.tween_property(_picker, "position:x", 0.0, PICKER_SWIPE_SECONDS)
+	var targets: Array[Control] = [_picker.header_swatch, _picker.header_name]
+	for i in flyers.size():
+		_picker_tween.tween_property(flyers[i], "global_position", targets[i].global_position + offset,
+				PICKER_SWIPE_SECONDS)
+		_picker_tween.tween_property(flyers[i], "scale", Vector2.ONE * ThreadPicker.HEADER_SCALE,
+				PICKER_SWIPE_SECONDS)
+	_picker_tween.chain().tween_callback(func() -> void:
+		for flyer in flyers:
+			flyer.queue_free()
+		_picker.header_swatch.modulate.a = 1.0
+		_picker.header_name.modulate.a = 1.0
+		_side.visible = false)
+
+
+## Back from the picker to the colour list, which swipes in from the right; with a `new_code`
+## the colour `old_code` is replaced first, so the list comes back with it.
+func _close_picker(old_code: String, new_code: String) -> void:
+	if not _picker_open:
+		return
+	_picker_open = false
+	if _picker_tween != null:
+		_picker_tween.kill()
+	if not new_code.is_empty():
+		_project.replace_color(old_code, new_code, _palette)
+		_apply_preferences()
+		_full_pattern = _project.full_pattern(_palette)
+		_show_pattern(true)
+		_save()
+	else:
+		_fill_color_list()
+	var width := _list_host.size.x
+	_side.visible = true
+	_side.position.x = width
+	_picker_tween = create_tween().set_parallel().set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_IN_OUT)
+	_picker_tween.tween_property(_picker, "position:x", -width, PICKER_SWIPE_SECONDS)
+	_picker_tween.tween_property(_side, "position:x", 0.0, PICKER_SWIPE_SECONDS)
+	_picker_tween.chain().tween_callback(func() -> void: _picker.visible = false)
+
+
+## Leaves the picker at once, without animation (another screen or project).
+func _close_picker_now() -> void:
+	if _picker == null:
+		return
+	if _picker_tween != null:
+		_picker_tween.kill()
+		_picker_tween = null
+	var was_open := _picker_open
+	_picker_open = false
+	_picker.visible = false
+	_side.visible = true
+	_side.position.x = 0.0
+	if was_open and _project != null:
+		_fill_color_list()
+
+
 func _on_fabric_toggled(pressed: bool, code: String) -> void:
 	var fabric_codes := _project.fabric_codes
 	if pressed and not fabric_codes.has(code):
@@ -1015,6 +1135,7 @@ func _on_fabric_toggled(pressed: bool, code: String) -> void:
 
 
 func _enter_stitching(thread: int) -> void:
+	_close_picker_now()
 	_stitch_thread = thread
 	_update_visibility()
 	var step := _project.session.current_step(thread)
@@ -1145,6 +1266,9 @@ func _handle_cmdline() -> void:
 	var zoom := 0.0
 	var overlays := PackedStringArray()
 	var tooltip := ""
+	var picker_code := ""
+	var pick_code := ""
+	var picker_view := PackedStringArray()
 	for arg in OS.get_cmdline_user_args():
 		if arg.begins_with("--open="):
 			_open_image(arg.trim_prefix("--open="))
@@ -1201,6 +1325,12 @@ func _handle_cmdline() -> void:
 		elif arg.begins_with("--ui="):
 			Preferences.set_touch_mode(arg.trim_prefix("--ui=") == "touch")
 			_apply_ui_mode()
+		elif arg.begins_with("--picker="):
+			picker_code = arg.trim_prefix("--picker=")
+		elif arg.begins_with("--picker-view="):
+			picker_view = arg.trim_prefix("--picker-view=").split(",")
+		elif arg.begins_with("--pick="):
+			pick_code = arg.trim_prefix("--pick=")
 		elif arg.begins_with("--overlays="):
 			overlays = arg.trim_prefix("--overlays=").split(",")
 		elif arg.begins_with("--tooltip="):
@@ -1235,6 +1365,21 @@ func _handle_cmdline() -> void:
 		if tooltip_button != null:
 			await get_tree().process_frame
 			tooltip_button.show_tooltip()
+	if not picker_code.is_empty() and _project != null and _stitch_thread < 0:
+		await get_tree().process_frame
+		for row in _color_list.get_children():
+			if row.get_child(1) is Label and (row.get_child(1) as Label).text == picker_code:
+				_open_picker(_palette.find_code(picker_code), row.get_child(0), row.get_child(2))
+		while _picker_tween == null or _picker_tween.is_running():
+			await get_tree().process_frame
+		if not picker_view.is_empty():
+			_picker.set_view(picker_view.has("list"), picker_view.has("project"))
+			while _picker.is_animating():
+				await get_tree().process_frame
+		if not pick_code.is_empty():
+			_picker.choose(pick_code)
+			while _picker.is_animating():
+				await get_tree().process_frame
 	if screenshot_path.is_empty():
 		return
 	while not _overlay_moving.is_empty() or _view.is_panning():

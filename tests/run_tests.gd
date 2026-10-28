@@ -33,6 +33,9 @@ func _initialize() -> void:
 	_test_english()
 	_test_whole_back_pass()
 	_test_max_block()
+	_test_color_replacement()
+	_test_format_2_loads()
+	_test_picker_order()
 	# The root joins the tree only once the main loop runs; gestures need it for their timers.
 	await process_frame
 	_test_gestures()
@@ -821,6 +824,58 @@ func _test_max_block() -> void:
 			_check(step.cells.size() <= 2, "english %s: blocks of 2" % english)
 		session.set_max_block(StitchPlanner.DEFAULT_MAX_BLOCK)
 	_check(Preferences.max_block() >= 1, "preference readable")
+
+
+## Swapping a colour keeps every stitch; a colour already in the image merges with it.
+func _test_color_replacement() -> void:
+	var palette := FlossPalette.dmc()
+	var project := _sample_project()
+	var states := project.session.cell_states()
+	var crosses := project.finished_crosses()
+	var threads := project.pattern.thread_codes.size()
+	project.replace_color("3837", "310", palette)
+	_check(project.pattern.thread_codes.has("310") and not project.pattern.thread_codes.has("3837"),
+			"replaced colour is stitched instead")
+	_check(project.full_pattern(palette).thread_codes.has("310"), "colour list shows the new colour")
+	_check(project.session.cell_states() == states and project.finished_crosses() == crosses,
+			"stitches stay after replacing")
+	project.replace_color("154", "310", palette)
+	_check(project.pattern.thread_codes.size() == threads - 1, "replacing with a used colour merges")
+	_check(project.session.cell_states() == states, "stitches stay after merging")
+	var loaded := StitchProject.from_dict(JSON.parse_string(JSON.stringify(project.to_dict())))
+	_check(loaded != null and loaded.replacements == project.replacements
+			and loaded.pattern.thread_codes == project.pattern.thread_codes, "replacements survive saving")
+	project.replace_color("310", "3837", palette)
+	_check(project.replacements.get("154") == "3837" and not project.replacements.has("3837"),
+			"replacing again follows earlier replacements, got %s" % project.replacements)
+
+
+## Files saved before format 3 load with no colour replacements.
+func _test_format_2_loads() -> void:
+	var data := _sample_project().to_dict()
+	data.format = 2
+	data.erase("color_replacements")
+	var loaded := StitchProject.from_dict(data)
+	_check(loaded != null and loaded.replacements.is_empty(), "format 2 file loads")
+
+
+## The colour picker: greys first, then hues; every row from light to dark.
+func _test_picker_order() -> void:
+	const COLUMNS := 16
+	var colors := FlossPalette.dmc().colors
+	var cells := ThreadGrid.arrange(colors, COLUMNS)
+	var shown := cells.filter(func(floss: FlossColor) -> bool: return floss != null)
+	_check(shown.size() == colors.size(), "picker shows every colour once")
+	var sorted_rows := true
+	for start in range(0, cells.size(), COLUMNS):
+		var row := cells.slice(start, start + COLUMNS).filter(func(floss: FlossColor) -> bool: return floss != null)
+		for i in range(1, row.size()):
+			sorted_rows = sorted_rows and row[i - 1].lab.x >= row[i].lab.x
+	_check(sorted_rows, "picker rows go from light to dark")
+	_check(Vector2(cells[0].lab.y, cells[0].lab.z).length() < ThreadGrid.GREY_CHROMA, "picker starts with greys")
+	var few: Array[FlossColor] = []
+	few.assign(colors.slice(0, 20))
+	_check(not ThreadGrid.arrange(few, COLUMNS, false).has(null), "project colours move together")
 
 
 ## Gestures on the pattern view, fed as touch events (the mouse arrives the same way).

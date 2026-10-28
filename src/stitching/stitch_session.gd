@@ -255,8 +255,9 @@ func cell_states() -> PackedByteArray:
 ## (its cells have at least a bottom leg for half stitches, a whole cross otherwise). This works
 ## whatever order the plan has now, so changed settings or planner rules keep the progress.
 ##
-## A step whose first cells are stitched and the rest not (a longer step in the new plan, e.g. a
-## whole return pass after blocks of 5) is split there, so those stitches aren't lost.
+## A step with stitched and unstitched cells (a longer step in the new plan, e.g. a whole return
+## pass after blocks of 5, or two colours merged into one) is split where they meet, so those
+## stitches aren't lost.
 func restore(saved_states: PackedByteArray) -> void:
 	_done.clear()
 	for thread in pattern.thread_codes.size():
@@ -266,14 +267,16 @@ func restore(saved_states: PackedByteArray) -> void:
 		while i < all.size():
 			var step := all[i]
 			var needed := Cell.HALF if step.kind == StitchStep.Kind.HALF else Cell.FULL
-			var shown := 0
-			while shown < step.cells.size() and saved_states[step.row * pattern.width + step.cells[shown]] >= needed:
-				shown += 1
-			if shown > 0 and shown < step.cells.size():
-				var rest := StitchStep.new(step.kind, thread, step.row, step.cells.slice(shown), step.direction)
-				step.cells = step.cells.slice(0, shown)
+			var done := saved_states[step.row * pattern.width + step.cells[0]] >= needed
+			var same := 1
+			while (same < step.cells.size()
+					and (saved_states[step.row * pattern.width + step.cells[same]] >= needed) == done):
+				same += 1
+			if same < step.cells.size():
+				var rest := StitchStep.new(step.kind, thread, step.row, step.cells.slice(same), step.direction)
+				step.cells = step.cells.slice(0, same)
 				all.insert(i + 1, rest)
-			flags.append(1 if shown == step.cells.size() else 0)
+			flags.append(1 if done else 0)
 			i += 1
 		_done[thread] = flags
 

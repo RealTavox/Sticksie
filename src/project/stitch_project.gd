@@ -5,8 +5,8 @@ extends RefCounted
 
 ## Save format version. A file with a higher number comes from a newer app and is not loaded.
 ## 1: first version. 2: adds progress.max_skip and progress.manual_thread_starts (format 1 files
-## get no limit and no manual thread changes).
-const FORMAT := 2
+## get no limit and no manual thread changes). 3: adds color_replacements (older files get none).
+const FORMAT := 3
 
 var name: String
 ## Where the project is saved (user://…), empty until it has been saved once.
@@ -14,6 +14,8 @@ var path := ""
 var image: Image
 ## Thread codes the user marked as fabric (not stitched).
 var fabric_codes := PackedStringArray()
+## Colours the user swapped: thread code the image matched -> code chosen instead.
+var replacements := {}
 ## The pattern without the fabric colours: what gets stitched.
 var pattern: Pattern
 var session: StitchSession
@@ -30,13 +32,51 @@ static func create(p_name: String, p_image: Image, palette: FlossPalette) -> Sti
 ## Rebuilds the pattern from the image and the fabric choice. Starts a new session, so earlier
 ## progress is gone.
 func rebuild(palette: FlossPalette) -> void:
-	pattern = PatternImporter.from_image(image, palette, fabric_codes)
+	pattern = PatternImporter.from_image(image, palette, fabric_codes, replacements)
 	session = StitchSession.new(pattern)
 
 
 ## The pattern with every colour of the image, fabric colours included.
 func full_pattern(palette: FlossPalette) -> Pattern:
-	return PatternImporter.from_image(image, palette)
+	return PatternImporter.from_image(image, palette, PackedStringArray(), replacements)
+
+
+## Stitches thread `new_code` wherever `old_code` is now. If `new_code` is already in the
+## image the two become one thread, keeping its fabric choice; otherwise it takes over
+## `old_code`'s. Stitched cells stay stitched and manual thread changes stay where they were;
+## the order of the steps is planned again.
+func replace_color(old_code: String, new_code: String, palette: FlossPalette) -> void:
+	if old_code == new_code:
+		return
+	var merging := full_pattern(palette).thread_codes.has(new_code)
+	for code: String in replacements:
+		if replacements[code] == old_code:
+			replacements[code] = new_code
+	replacements[old_code] = new_code
+	for code: String in replacements.keys():
+		if replacements[code] == code:
+			replacements.erase(code)
+	if fabric_codes.has(old_code):
+		fabric_codes.remove_at(fabric_codes.find(old_code))
+		if not merging and not fabric_codes.has(new_code):
+			fabric_codes.append(new_code)
+	var old_session := session
+	var states := old_session.cell_states()
+	var manual := old_session.manual_starts_by_code()
+	if manual.has(old_code):
+		var moved: Array = manual[old_code]
+		manual.erase(old_code)
+		manual[new_code] = manual.get(new_code, []) + moved
+	pattern = PatternImporter.from_image(image, palette, fabric_codes, replacements)
+	session = StitchSession.new(pattern)
+	session.top_to_bottom = old_session.top_to_bottom
+	session.start_left = old_session.start_left
+	session.max_skip = old_session.max_skip
+	session.english = old_session.english
+	session.whole_back = old_session.whole_back
+	session.max_block = old_session.max_block
+	session.restore_manual_starts(manual)
+	session.restore(states)
 
 
 ## Whole crosses stitched, over all threads.
@@ -62,6 +102,7 @@ func to_dict() -> Dictionary:
 		"saved_at": Time.get_datetime_string_from_system(),
 		"image_png": Marshalls.raw_to_base64(image.save_png_to_buffer()),
 		"fabric_codes": Array(fabric_codes),
+		"color_replacements": replacements.duplicate(),
 		"pattern": {
 			"width": pattern.width,
 			"height": pattern.height,
@@ -116,6 +157,10 @@ static func from_dict(data: Dictionary) -> StitchProject:
 	project.name = str(data.get("name", "Projekt"))
 	project.image = image
 	project.fabric_codes = PackedStringArray(data.get("fabric_codes", []))
+	var saved_replacements: Variant = data.get("color_replacements", {})
+	if saved_replacements is Dictionary:
+		for code in saved_replacements:
+			project.replacements[str(code)] = str(saved_replacements[code])
 	project.pattern = pattern
 	project.session = StitchSession.new(pattern)
 	project.session.top_to_bottom = bool(progress.get("top_to_bottom", true))
