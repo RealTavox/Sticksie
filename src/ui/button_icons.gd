@@ -5,7 +5,7 @@ class_name ButtonIcons
 ## units of the button's disc: (0, 0) is its centre, 1 its rim, y points down. Each mask is
 ## made once and cached.
 
-enum Icon { MENU, TEXT, NEEDLE, SPOOL, PIN, IMAGE, FOLDER, PROJECTS, GEAR, PENCIL, TRASH, CLOSE, CHECK }
+enum Icon { MENU, TEXT, NEEDLE, SPOOL, PIN, IMAGE, FOLDER, PROJECTS, GEAR, PENCIL, TRASH, CLOSE, CHECK, OVERVIEW, FLIP, BACK, NEW_THREAD }
 
 const SIZE := 128
 
@@ -200,7 +200,47 @@ static func distance(icon: Icon, p: Vector2) -> float:
 		Icon.CHECK:
 			return minf(_capsule(p, Vector2(-0.32, 0.02), Vector2(-0.1, 0.24), 0.065),
 					_capsule(p, Vector2(-0.1, 0.24), Vector2(0.34, -0.26), 0.065))
+		Icon.OVERVIEW:
+			# The whole pattern: a frame with four little crosses in it.
+			var d := absf(_box(p, Vector2.ZERO, Vector2(0.42, 0.42), 0.08)) - 0.04
+			for center in [Vector2(-0.14, -0.14), Vector2(0.14, -0.14), Vector2(-0.14, 0.14), Vector2(0.14, 0.14)]:
+				d = minf(d, _capsule(p, center - Vector2(0.08, 0.08), center + Vector2(0.08, 0.08), 0.035))
+				d = minf(d, _capsule(p, center + Vector2(-0.08, 0.08), center + Vector2(0.08, -0.08), 0.035))
+			return d
+		Icon.FLIP:
+			# Turning the fabric over: two half-round arrows going round clockwise.
+			return minf(_arc_arrow(p, deg_to_rad(-160.0), deg_to_rad(-25.0)),
+					_arc_arrow(p, deg_to_rad(20.0), deg_to_rad(155.0)))
+		Icon.BACK:
+			# An arrow to the left.
+			var d := _capsule(p, Vector2(-0.3, 0.0), Vector2(0.32, 0.0), 0.06)
+			d = minf(d, _capsule(p, Vector2(-0.3, 0.0), Vector2(-0.08, -0.22), 0.06))
+			return minf(d, _capsule(p, Vector2(-0.3, 0.0), Vector2(-0.08, 0.22), 0.06))
+		Icon.NEW_THREAD:
+			# The needle with its thread, a little smaller, up left and drawn bolder (it is fine for
+			# the small size), and a plus beside it.
+			var plus := minf(_capsule(p, Vector2(0.12, 0.29), Vector2(0.42, 0.29), 0.06),
+					_capsule(p, Vector2(0.27, 0.14), Vector2(0.27, 0.44), 0.06))
+			const SHRINK := 1.15
+			var needle := distance(Icon.NEEDLE, (p + Vector2(0.06, 0.06)) * SHRINK) / SHRINK - 0.025
+			return minf(maxf(needle, 0.07 - plus), plus)
 	return INF
+
+
+## An arc of radius 0.3 from angle `from` to `to` (radians, clockwise on screen), with an arrow
+## head at `to`.
+static func _arc_arrow(p: Vector2, from: float, to: float) -> float:
+	const RADIUS := 0.3
+	const SEGMENTS := 12
+	var d := INF
+	var previous := Vector2.from_angle(from) * RADIUS
+	for i in range(1, SEGMENTS + 1):
+		var point := Vector2.from_angle(lerpf(from, to, float(i) / SEGMENTS)) * RADIUS
+		d = minf(d, _capsule(p, previous, point, 0.055))
+		previous = point
+	var out := Vector2.from_angle(to)
+	var along := Vector2(-out.y, out.x)
+	return minf(d, _triangle(p, previous + out * 0.13, previous - out * 0.13, previous + along * 0.17))
 
 
 static func _capsule(p: Vector2, a: Vector2, b: Vector2, radius: float) -> float:

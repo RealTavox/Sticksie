@@ -55,7 +55,7 @@ item is resolved during normal work, delete its entry in the same change.
   step guidance (texts in `info`, buttons in `controls`, so the touch layout can split them),
   `RoundButton` the round see-through touch buttons (lit by `round_button.gdshader` from the
   same light as the fabric, `tint_color` when on: the block colour while stitching, blue in the overview, symbols from `ButtonIcons` distance functions, tooltip on long press; `ButtonIcons.button_icon()`
-  draws the same symbols white for ordinary buttons: menu, windows, project list),
+  draws the same symbols white for ordinary buttons: menu, windows, project list, stitching buttons),
   `OverlayWindow` the in-app windows in the overlays' look (dark rounded panel, title with a close
   button, scrolling content, buttons at the bottom, over a dimmed screen that takes all input and
   keys; slides up and fades in, back down and out; the settings, the project list and its rename

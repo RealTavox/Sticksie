@@ -60,14 +60,14 @@ func _init() -> void:
 
 	var buttons := HBoxContainer.new()
 	controls.add_child(buttons)
-	_previous_button = _make_button("◂ Zurück")
+	_previous_button = _make_button("Zurück", ButtonIcons.Icon.BACK)
 	_previous_button.pressed.connect(previous_pressed.emit)
 	buttons.add_child(_previous_button)
-	_next_button = _make_button("Gestickt ▸")
+	_next_button = _make_button("Gestickt", ButtonIcons.Icon.CHECK)
 	_next_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_next_button.pressed.connect(next_pressed.emit)
 	buttons.add_child(_next_button)
-	_new_thread_button = _make_button("Neuer Faden ab hier")
+	_new_thread_button = _make_button("Neuer Faden ab hier", ButtonIcons.Icon.NEW_THREAD)
 	_new_thread_button.toggle_mode = true
 	_new_thread_button.custom_minimum_size.y = BUTTON_HEIGHT * 0.75
 	_new_thread_button.tooltip_text = "Der Faden ist zu kurz oder verknotet: vor diesem Schritt einen neuen Faden nehmen."
@@ -236,9 +236,12 @@ static func describe_offset(offset: Vector2i, reference: String) -> String:
 	return "Ab %s zählen: %s." % [reference, ", dann ".join(legs)]
 
 
-func _make_button(text: String) -> Button:
+func _make_button(text: String, icon: ButtonIcons.Icon) -> Button:
 	var button := Button.new()
 	button.text = text
+	button.icon = ButtonIcons.button_icon(icon, OverlayWindow.ICON_PX)
+	button.add_theme_constant_override("icon_max_width", OverlayWindow.ICON_PX)
+	button.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
 	button.focus_mode = Control.FOCUS_NONE
 	button.custom_minimum_size.y = BUTTON_HEIGHT
 	return button

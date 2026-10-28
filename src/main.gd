@@ -219,10 +219,10 @@ func _build_ui() -> void:
 	_projects_button = _make_toolbar_button("Projekte", _show_projects, ButtonIcons.Icon.PROJECTS, false)
 	_toolbar.add_child(_projects_button)
 	_toolbar.add_child(_make_toolbar_button("Einstellungen", _show_settings, ButtonIcons.Icon.GEAR, false))
-	_overview_button = _make_toolbar_button("◂ Übersicht", _leave_stitching)
+	_overview_button = _make_toolbar_button("Übersicht", _leave_stitching, ButtonIcons.Icon.OVERVIEW)
 	_overview_button.visible = false
 	_toolbar.add_child(_overview_button)
-	_side_button = _make_toolbar_button("Rückseite", _toggle_back_side)
+	_side_button = _make_toolbar_button("Rückseite", _toggle_back_side, ButtonIcons.Icon.FLIP)
 	_side_button.visible = false
 	_toolbar.add_child(_side_button)
 	_info_label = Label.new()
