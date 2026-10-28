@@ -98,13 +98,16 @@ item is resolved during normal work, delete its entry in the same change.
   (`StitchScene.orbit()`: shifted towards the light, so it rises towards overhead on the far side
   and never comes low from the opposite corner; `main.gd` `_spin_light()`), during both shows it
   keeps turning (`_loop_light()`),
-  `StepSymbols` the small square symbol window at the bottom middle of the stitching screen
-  (above the round buttons and open panels, gliding along; room for it is kept with
-  `set_covered()`): white symbols only, a card per part of the step, each animated and repeating,
-  redrawn at most 30 times a second: securing the old thread (needle under the back stitches,
-  scissors), threading (the doubled thread through the eye of the user's needle,
-  `ButtonIcons.needle_icon(…, true)` flat white), counting (an arrow per direction with its
-  count) and the stitch (up hole, down hole, arrow, how many),
+  `StepSymbols` the small symbol window at the bottom middle of the stitching screen
+  (above the round buttons and open panels, gliding along, as wide as its cards; room for it is
+  kept with `set_covered()`): white symbols only, a square card per part of the step side by
+  side, each animated once, one after the other from left to right (waiting ones faded), then
+  standing; redrawn at most 30 times a second while playing: securing the old thread (needle
+  under the back stitches, scissors), threading (the doubled thread through the eye of the
+  user's needle, `ButtonIcons.needle_icon(…, true)` flat white), starting with the loop (side
+  view: down through a hole, up through the next, through the loop, back down the same hole),
+  counting (an arrow per direction with its count) and the stitch (up hole, down hole, arrow,
+  how many),
   `SkeinSwatch` a thread colour drawn as a square of the pure
   colour with a loop of thread coming out of it (one colourless template image per shape,
   tinted by `skein.gdshader`, so it fades as one; tapping it opens the colour picker),
@@ -150,7 +153,7 @@ How to check a change; every fix and feature runs these. Godot binary:
    skip limit (-1: none), `--start=<auto|top-left|top-right|bottom-left|bottom-right>` the start corner, `--settings` to open the settings dialog, `--projects` the project list, `--back` the back side while stitching,
    `--method=<danish|english>`, `--back-pass=<whole|blocks>`, `--max-block=<n>`, `--needle=<auto|bottom|top>`, `--first-leg=<slash|backslash>`
    (both fix the style), `--advanced` / `--dev-tools` with `--settings` for the advanced part / developer tools, `--dev=<on|off>` the developer mode (saved), `--symbols=<on|off>` the symbol window (saved) or
-   `--symbols=<secure|thread|count|stitch>[,<0..1>]` to hold that card at that point of its animation, `--ui=<touch|desktop>` the layout,
+   `--symbols=<secure|thread|anchor|count|stitch>[,<0..1>]` to hold that card at that point of its animation, `--ui=<touch|desktop>` the layout,
    `--overlays=<menu,pin,list,text>` opens touch overlays, `--picker=<code>` the colour picker
    for a colour of the list, `--picker-view=<list,project>` its list view and/or project filter, `--pick=<code>` chooses a colour in it, `--tooltip=<menu|list|text>` shows a
    round button's tooltip, `--safe-area=<l>,<t>,<r>,<b>` fakes a notch or island (canvas px), `--finish` stitches the rest of the `--stitch` colour (the celebration comes in), `--dismiss` taps it away to the overview, `--finale` shows the finished-project show, `--wait=<seconds>` waits that long before the screenshot (e.g. into the bar's fill; otherwise screenshots wait for the fill), `--zoom=<cell px>`

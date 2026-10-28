@@ -136,6 +136,8 @@ var _dev_button: RoundButton
 var _symbols: StepSymbols
 var _symbols_box: CheckBox
 var _symbols_placed := false
+## How far above the pattern's lower edge it was last put (the touch layout's buttons and panels).
+var _symbols_bottom := 0.0
 var _symbols_tween: Tween
 var _needle_option: OptionButton
 var _leg_option: OptionButton
@@ -949,6 +951,7 @@ func _update_cover() -> void:
 func _update_symbols() -> void:
 	var show := _stitch_thread >= 0 and Preferences.step_symbols() and _symbols.has_cards()
 	if show == _symbols.visible:
+		_place_symbols(_symbols_bottom)  # It may have grown or shrunk with its cards.
 		return
 	_symbols.visible = show
 	_symbols_placed = false
@@ -963,13 +966,14 @@ func _symbols_room() -> float:
 	return StepSymbols.SIDE + TOUCH_MARGIN if _symbols.visible else 0.0
 
 
-## Puts the symbol window in the middle at the bottom of the pattern, `bottom` above its lower edge
+## Puts the symbol window (as wide as its cards) in the middle at the bottom of the pattern, `bottom` above its lower edge
 ## (the round buttons and open panels in the touch layout); it glides there when it moves.
 func _place_symbols(bottom: float) -> void:
+	_symbols_bottom = bottom
 	if not _symbols.visible:
 		return
 	var view := _view.get_global_rect()
-	var target := Vector2(view.get_center().x - StepSymbols.SIDE / 2.0,
+	var target := Vector2(view.get_center().x - _symbols.size.x / 2.0,
 			view.end.y - bottom - StepSymbols.SIDE - TOUCH_MARGIN).round()
 	if _symbols_tween != null:
 		_symbols_tween.kill()
@@ -1805,7 +1809,7 @@ func _handle_cmdline() -> void:
 				while _stitch_thread >= 0:
 					await get_tree().process_frame
 		if not symbols_card.is_empty():
-			var card: int = ["secure", "thread", "count", "stitch"].find(symbols_card[0])
+			var card: int = ["secure", "thread", "anchor", "count", "stitch"].find(symbols_card[0])
 			if card >= 0:
 				_symbols.hold(card as StepSymbols.Card, symbols_card[1].to_float() if symbols_card.size() > 1 else 1.0)
 		var step := _project.session.current_step(_stitch_thread) if _stitch_thread >= 0 else null
