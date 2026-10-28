@@ -124,6 +124,13 @@ var _whole_back_box: CheckBox
 var _block_spin: SpinBox
 var _advanced_button: Button
 var _advanced_box: VBoxContainer
+## Entwicklertools in the settings, only in debug builds: the light, the sample image and the
+## developer mode.
+var _dev_tools_button: Button
+var _dev_tools_box: VBoxContainer
+var _dev_mode_box: CheckBox
+## Shown under the menu button in developer mode; a toggle without a job yet.
+var _dev_button: RoundButton
 var _needle_option: OptionButton
 var _leg_option: OptionButton
 var _needle_start_option: OptionButton
@@ -220,17 +227,18 @@ func _build_ui() -> void:
 
 	# These open a window, which closes the menu itself (and opens it again afterwards).
 	_toolbar = HFlowContainer.new()
-	_open_button = _make_toolbar_button("Bild öffnen…", _show_open_image, ButtonIcons.Icon.IMAGE, false)
+	_open_button = _make_toolbar_button("Neu", _show_open_image, ButtonIcons.Icon.IMAGE, false)
 	_toolbar.add_child(_open_button)
 	_projects_button = _make_toolbar_button("Projekte", _show_projects, ButtonIcons.Icon.PROJECTS, false)
 	_toolbar.add_child(_projects_button)
-	_toolbar.add_child(_make_toolbar_button("Einstellungen", _show_settings, ButtonIcons.Icon.GEAR, false))
 	_overview_button = _make_toolbar_button("Übersicht", _slide_to_overview, ButtonIcons.Icon.OVERVIEW)
 	_overview_button.visible = false
 	_toolbar.add_child(_overview_button)
 	_side_button = _make_toolbar_button("Rückseite", _toggle_back_side, ButtonIcons.Icon.FLIP)
 	_side_button.visible = false
 	_toolbar.add_child(_side_button)
+	# Last, so it comes after Rückseite while stitching.
+	_toolbar.add_child(_make_toolbar_button("Einstellungen", _show_settings, ButtonIcons.Icon.GEAR, false))
 	_info_label = Label.new()
 	_info_label.text = "Öffne ein Pixelart-Bild (PNG). Ein Pixel wird ein Kreuzstich."
 	_info_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -356,9 +364,12 @@ func _build_touch_shell() -> void:
 	_list_content = VBoxContainer.new()
 	_list_panel.add_child(_list_content)
 
-	_menu_button = _make_round_button(ButtonIcons.Icon.MENU, "Menü: Bilder, Projekte, Einstellungen", _menu_panel)
+	_menu_button = _make_round_button(ButtonIcons.Icon.MENU, "Menü: Neu, Projekte, Einstellungen", _menu_panel)
 	_list_button = _make_round_button(ButtonIcons.Icon.SPOOL, "", _list_panel)
 	_text_button = _make_round_button(ButtonIcons.Icon.TEXT, "", _text_panel)
+	_dev_button = RoundButton.new(ButtonIcons.Icon.WRENCH, "Entwicklermodus (noch ohne Funktion)", ROUND_BUTTON_PX)
+	_dev_button.toggle_mode = true
+	_touch_root.add_child(_dev_button)
 
 
 func _make_overlay_panel() -> PanelContainer:
@@ -562,7 +573,7 @@ func _update_visibility() -> void:
 		_text_button.tooltip = "Projektinfo ein- und ausblenden"
 
 
-## The light on fabric and thread in the advanced settings: where it comes from and how high
+## The light on fabric and thread in the developer tools: where it comes from and how high
 ## above the fabric. Moving a slider shows it right away; Abbrechen puts the saved light back.
 func _make_light_row() -> HBoxContainer:
 	var row := HBoxContainer.new()
@@ -593,7 +604,7 @@ func _make_light_slider(from: float, to: float, value: float) -> HSlider:
 func _apply_light() -> void:
 	var light := StitchScene.orbit(_light_azimuth.value, _light_elevation.value, _light_spin)
 	_view.set_light(light.x, light.y)
-	for button: RoundButton in [_menu_button, _list_button, _text_button, _menu_pin]:
+	for button: RoundButton in [_menu_button, _list_button, _text_button, _menu_pin, _dev_button]:
 		button.set_light(light.x, light.y)
 
 
@@ -710,15 +721,9 @@ func _build_settings_dialog() -> void:
 	_build_advanced_settings(content)
 
 
-## The advanced part, closed at first so the window stays short: how each cross is worked, the
-## light, and the sample image.
+## The advanced part, closed at first so the window stays short: how each cross is worked.
 func _build_advanced_settings(content: VBoxContainer) -> void:
-	_advanced_button = Button.new()
-	_advanced_button.toggle_mode = true
-	_advanced_button.flat = true
-	_advanced_button.alignment = HORIZONTAL_ALIGNMENT_LEFT
-	_advanced_button.custom_minimum_size.y = BUTTON_HEIGHT
-	_advanced_button.toggled.connect(_show_advanced)
+	_advanced_button = _make_section_button(_show_advanced)
 	content.add_child(_advanced_button)
 	_advanced_box = VBoxContainer.new()
 	content.add_child(_advanced_box)
@@ -735,19 +740,57 @@ func _build_advanced_settings(content: VBoxContainer) -> void:
 			+ "Fest: jeder Schenkel genau so, wie gewählt. Auf der Rückseite kann der Faden dann "
 			+ "schräg über zwei Felder laufen. Nicht mitten im Projekt wechseln, sonst liegen die "
 			+ "oberen Schenkel nicht mehr gleich."))
-	_advanced_box.add_child(HSeparator.new())
-	_advanced_box.add_child(_make_light_row())
-	_advanced_box.add_child(_make_note("Richtung im Uhrzeigersinn von oben (315 = oben links) und Höhe über "
+	_show_advanced(false)
+	var light_row := _make_light_row()
+	if OS.is_debug_build():
+		_build_dev_tools(content, light_row)
+
+
+## Tools for development, closed at first: the light, the sample image and the developer mode.
+## Only in debug builds (editor and debug exports); the light sliders exist anyway, as they
+## hold the saved light.
+func _build_dev_tools(content: VBoxContainer, light_row: Control) -> void:
+	content.add_child(HSeparator.new())
+	_dev_tools_button = _make_section_button(_show_dev_tools)
+	content.add_child(_dev_tools_button)
+	_dev_tools_box = VBoxContainer.new()
+	content.add_child(_dev_tools_box)
+	_dev_tools_box.add_child(light_row)
+	_dev_tools_box.add_child(_make_note("Richtung im Uhrzeigersinn von oben (315 = oben links) und Höhe über "
 			+ "dem Stoff (90 = genau von oben). Nach jedem Schritt kreist das Licht einmal auf einem Oval."))
-	_advanced_box.add_child(HSeparator.new())
+	_dev_tools_box.add_child(HSeparator.new())
 	# Opening the sample leaves the settings unchanged, like Abbrechen.
 	var sample_button := OverlayWindow.make_button("Beispielbild öffnen", ButtonIcons.Icon.IMAGE, func() -> void:
 		_settings_dialog.close()
 		_open_image(SAMPLE_PATH))
 	sample_button.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
-	_advanced_box.add_child(sample_button)
-	_advanced_box.add_child(_make_note("Ein kleines Muster zum Ausprobieren, als neues Projekt."))
-	_show_advanced(false)
+	_dev_tools_box.add_child(sample_button)
+	_dev_tools_box.add_child(_make_note("Ein kleines Muster zum Ausprobieren, als neues Projekt."))
+	_dev_tools_box.add_child(HSeparator.new())
+	_dev_mode_box = CheckBox.new()
+	_dev_mode_box.text = "Entwicklermodus"
+	_dev_tools_box.add_child(_dev_mode_box)
+	_dev_tools_box.add_child(_make_note("Zeigt im Touch-Layout einen Knopf unter dem Menüknopf (noch ohne Funktion)."))
+	_show_dev_tools(false)
+
+
+## A flat button that opens and closes a part of the settings.
+func _make_section_button(on_toggled: Callable) -> Button:
+	var button := Button.new()
+	button.toggle_mode = true
+	button.flat = true
+	button.alignment = HORIZONTAL_ALIGNMENT_LEFT
+	button.custom_minimum_size.y = BUTTON_HEIGHT
+	button.toggled.connect(on_toggled)
+	return button
+
+
+func _show_dev_tools(open: bool) -> void:
+	if _dev_tools_button == null:
+		return
+	_dev_tools_button.set_pressed_no_signal(open)
+	_dev_tools_button.text = ("▾ " if open else "▸ ") + "Entwicklertools"
+	_dev_tools_box.visible = open
 
 
 ## A wrapped explanation in the settings, faded to `alpha`.
@@ -816,6 +859,9 @@ func _layout_touch() -> void:
 	var right := size.x - _safe.z - TOUCH_MARGIN
 	var bottom_row := size.y - _safe.w - TOUCH_MARGIN - ROUND_BUTTON_PX
 	_menu_button.position = Vector2(left, _safe.y + TOUCH_MARGIN)
+	_dev_button.position = _menu_button.position + Vector2(0.0, ROUND_BUTTON_PX + TOUCH_MARGIN)
+	_dev_button.size = _dev_button.custom_minimum_size
+	_dev_button.visible = Preferences.developer_mode()
 	_list_button.position = Vector2(left, bottom_row)
 	_text_button.position = Vector2(right - ROUND_BUTTON_PX, bottom_row)
 	for button: Control in [_menu_button, _list_button, _text_button]:
@@ -994,6 +1040,8 @@ func _show_settings() -> void:
 	_leg_option.selected = 0 if Preferences.slash_first() else 1
 	_needle_start_option.selected = 1 if Preferences.needle_from_top() else 0
 	_update_needle_options()
+	if _dev_mode_box != null:
+		_dev_mode_box.button_pressed = Preferences.developer_mode()
 	_open_window(_settings_dialog)
 
 
@@ -1007,6 +1055,9 @@ static func _corner_index(top_to_bottom: bool, start_left: bool, auto: bool) -> 
 ## Stores the preferences and replans the open project; stitched cells stay stitched.
 func _apply_settings() -> void:
 	Preferences.set_light(_light_azimuth.value, _light_elevation.value)
+	if _dev_mode_box != null:
+		Preferences.set_developer_mode(_dev_mode_box.button_pressed)
+		_dev_button.visible = Preferences.developer_mode()
 	if (_ui_option.selected == 0) != Preferences.touch_mode():
 		Preferences.set_touch_mode(_ui_option.selected == 0)
 		_apply_ui_mode()
@@ -1434,7 +1485,7 @@ func _update_progress(animate := false) -> void:
 		value = _project.session.leg_progress(_stitch_thread)
 	_progress.set_color(color, animate)
 	_progress.set_value(value, animate)
-	for button: RoundButton in [_menu_button, _list_button, _text_button, _menu_pin]:
+	for button: RoundButton in [_menu_button, _list_button, _text_button, _menu_pin, _dev_button]:
 		button.tint_color = color
 
 
@@ -1588,6 +1639,11 @@ func _handle_cmdline() -> void:
 			_show_settings.call_deferred()
 		elif arg == "--advanced":
 			_show_advanced.call_deferred(true)
+		elif arg == "--dev-tools":
+			_show_dev_tools.call_deferred(true)
+		elif arg.begins_with("--dev="):
+			Preferences.set_developer_mode(arg.trim_prefix("--dev=") == "on")
+			_dev_button.visible = Preferences.developer_mode()
 		elif arg.begins_with("--method="):
 			Preferences.set_english(arg.trim_prefix("--method=") == "english")
 			if _project != null:

@@ -5,7 +5,7 @@ class_name ButtonIcons
 ## units of the button's disc: (0, 0) is its centre, 1 its rim, y points down. Each mask is
 ## made once and cached.
 
-enum Icon { MENU, TEXT, NEEDLE, SPOOL, PIN, IMAGE, FOLDER, PROJECTS, GEAR, PENCIL, TRASH, CLOSE, CHECK, OVERVIEW, FLIP, BACK, NEW_THREAD, LIST, FILTER }
+enum Icon { MENU, TEXT, NEEDLE, SPOOL, PIN, IMAGE, FOLDER, PROJECTS, GEAR, PENCIL, TRASH, CLOSE, CHECK, OVERVIEW, FLIP, BACK, NEW_THREAD, LIST, FILTER, WRENCH }
 
 const SIZE := 128
 
@@ -235,6 +235,11 @@ static func distance(icon: Icon, p: Vector2) -> float:
 			# A funnel: only some go through.
 			var funnel := _triangle(p, Vector2(-0.36, -0.3), Vector2(0.36, -0.3), Vector2(0.0, 0.12)) - 0.04
 			return minf(funnel, _box(p, Vector2(0.0, 0.16), Vector2(0.07, 0.2), 0.03))
+		Icon.WRENCH:
+			# A spanner leaning right: a handle and a round head with its jaw open to the top right.
+			var head := (p - Vector2(0.16, -0.16)).length() - 0.19
+			head = maxf(head, 0.11 - (p - Vector2(0.27, -0.27)).length())
+			return minf(head, _capsule(p, Vector2(-0.32, 0.32), Vector2(0.1, -0.1), 0.075))
 	return INF
 
 

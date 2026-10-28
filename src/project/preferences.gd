@@ -130,6 +130,16 @@ static func set_stitch_panels(list_open: bool, text_open: bool) -> void:
 	_store("stitch_text_open", text_open, "ui")
 
 
+## Developer mode (Entwicklertools in the settings): shows the developer button under the menu
+## button. Only in debug builds; release builds leave the developer tools out.
+static func developer_mode() -> bool:
+	return OS.is_debug_build() and bool(_load().get_value("dev", "developer_mode", false))
+
+
+static func set_developer_mode(value: bool) -> void:
+	_store("developer_mode", value, "dev")
+
+
 static func path() -> String:
 	return ProjectStore.directory.path_join("settings.cfg")
 

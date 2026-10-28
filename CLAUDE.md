@@ -21,10 +21,11 @@ item is resolved during normal work, delete its entry in the same change.
 - Project code: `src/` (`project/` saving: `StitchProject` and its JSON format, `ProjectStore`
   files in `user://projects/` (list with preview picture, rename, delete) and the last opened project, `Preferences` app-wide settings in
   `settings.cfg` next to the projects (light direction and height in section `view`, default from the top left at 55°, set in the
-  advanced settings; skip limit, start corner or automatic, stitch method, block size, the advanced
+  developer tools; skip limit, start corner or automatic, stitch method, block size, the advanced
   stitch style; not saved in the project file, pushed into the open project; plus the touch or
   desktop layout in section `ui`, default touch on mobile, and which touch panels are open while
-  stitching, closed until opened, then as left); `palette/` thread colours and Lab matching, `pattern/` the `Pattern`
+  stitching, closed until opened, then as left; developer mode in section `dev`, only honoured in
+  debug builds); `palette/` thread colours and Lab matching, `pattern/` the `Pattern`
   resource, `import/` PNG → pattern, `planner/` Danish stitch order (`StitchPlanner` →
   `StitchStep`s), `stitching/` progress per thread (`StitchSession`), the back of the fabric
   (`BackSide`: the thread between the needle holes, worked out from the planned steps; drawn
@@ -67,7 +68,9 @@ item is resolved during normal work, delete its entry in the same change.
   the open touch overlays, menu included, and `main.gd` `_restore_overlays()` opens them again when
   it closes), `ProjectBrowser` the
   project list: open, rename, delete after a confirmation; the preview comes from
-  `ProjectStore.preview()`, for now the source image, later meant to show the progress), `main.tscn`/`main.gd` the start screen (the sample image opens from the advanced settings): two layouts
+  `ProjectStore.preview()`, for now the source image, later meant to show the progress), `main.tscn`/`main.gd` the start screen (the settings' collapsible "Entwicklertools", built only when
+  `OS.is_debug_build()`, so release exports leave them out, hold the light, the sample image and
+  the developer mode, which shows a toggle `RoundButton` without a job yet under the menu button): two layouts
   built from the same widgets, moved by `_apply_ui_mode()`: desktop (toolbar, side panel) and
   touch (view on the whole screen, round buttons for the menu top left, which closes itself on
   the next touch of the view unless pinned, the colour list / stitching buttons bottom left, the
@@ -135,7 +138,7 @@ How to check a change; every fix and feature runs these. Godot binary:
    --steps=<n>` for the stitching screen after n confirmed steps, `--max-skip=<n>` to set the
    skip limit (-1: none), `--start=<auto|top-left|top-right|bottom-left|bottom-right>` the start corner, `--settings` to open the settings dialog, `--projects` the project list, `--back` the back side while stitching,
    `--method=<danish|english>`, `--back-pass=<whole|blocks>`, `--max-block=<n>`, `--needle=<auto|bottom|top>`, `--first-leg=<slash|backslash>`
-   (both fix the style), `--advanced` with `--settings` for the advanced part, `--ui=<touch|desktop>` the layout,
+   (both fix the style), `--advanced` / `--dev-tools` with `--settings` for the advanced part / developer tools, `--dev=<on|off>` the developer mode (saved), `--ui=<touch|desktop>` the layout,
    `--overlays=<menu,pin,list,text>` opens touch overlays, `--picker=<code>` the colour picker
    for a colour of the list, `--picker-view=<list,project>` its list view and/or project filter, `--pick=<code>` chooses a colour in it, `--tooltip=<menu|list|text>` shows a
    round button's tooltip, `--safe-area=<l>,<t>,<r>,<b>` fakes a notch or island (canvas px), `--finish` stitches the rest of the `--stitch` colour (the celebration comes in), `--dismiss` taps it away to the overview, `--finale` shows the finished-project show, `--wait=<seconds>` waits that long before the screenshot (e.g. into the bar's fill; otherwise screenshots wait for the fill), `--zoom=<cell px>`
