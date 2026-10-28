@@ -19,6 +19,9 @@ const BUTTON_HEIGHT := 48.0
 const SWATCH_SIZE := Vector2(28, 28)
 ## Smallest cell size when stitching starts, so the current block is easy to see.
 const STITCH_CELL_PX := 24.0
+## Starting light for the test sliders: from the top left, 40° above the fabric.
+const LIGHT_AZIMUTH := 315.0
+const LIGHT_ELEVATION := 40.0
 ## Start corners in the settings: label and (top_to_bottom, start_left).
 const START_CORNERS := [
 	["Oben links: Reihen nach rechts, dann nach unten", true, true],
@@ -68,6 +71,8 @@ var _side_button: Button
 var _info_label: Label
 var _body: BoxContainer
 var _view: PatternView
+var _light_azimuth: HSlider
+var _light_elevation: HSlider
 var _side: VBoxContainer
 var _color_list: VBoxContainer
 var _stitch_panel: StitchPanel
@@ -77,6 +82,7 @@ var _file_dialog: FileDialog
 func _ready() -> void:
 	_palette = FlossPalette.dmc()
 	_build_ui()
+	_apply_light()
 	resized.connect(_update_layout)
 	_update_layout()
 	var opens_image := false
@@ -130,6 +136,8 @@ func _build_ui() -> void:
 	_info_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	toolbar.add_child(_info_label)
 
+	root.add_child(_make_light_row())
+
 	_body = BoxContainer.new()
 	_body.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	root.add_child(_body)
@@ -170,6 +178,38 @@ func _build_ui() -> void:
 	_project_browser.project_renamed.connect(_on_project_renamed)
 	_project_browser.project_deleted.connect(_on_project_deleted)
 	add_child(_project_browser)
+
+
+## Test controls for the light on fabric and thread (direction and height above the fabric), to
+## judge the normal maps; to be removed once the look is settled.
+func _make_light_row() -> HBoxContainer:
+	var row := HBoxContainer.new()
+	var label := Label.new()
+	label.text = "Licht (Test):"
+	row.add_child(label)
+	_light_azimuth = _make_light_slider(0.0, 360.0, LIGHT_AZIMUTH)
+	row.add_child(_light_azimuth)
+	var height_label := Label.new()
+	height_label.text = "Höhe"
+	row.add_child(height_label)
+	_light_elevation = _make_light_slider(5.0, 90.0, LIGHT_ELEVATION)
+	row.add_child(_light_elevation)
+	return row
+
+
+func _make_light_slider(from: float, to: float, value: float) -> HSlider:
+	var slider := HSlider.new()
+	slider.min_value = from
+	slider.max_value = to
+	slider.value = value
+	slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	slider.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	slider.value_changed.connect(func(_value: float) -> void: _apply_light())
+	return slider
+
+
+func _apply_light() -> void:
+	_view.set_light(_light_azimuth.value, _light_elevation.value)
 
 
 func _build_settings_dialog() -> void:
@@ -607,13 +647,14 @@ func _refresh_stitching() -> void:
 
 
 func _toggle_back_side() -> void:
-	_set_back_side(not _view.back_side)
+	_set_back_side(not _view.back_side, true)
 	if _stitch_thread >= 0:
 		_refresh_stitching()
 
 
-func _set_back_side(back: bool) -> void:
-	_view.back_side = back
+## Shows the back or the front; with `animate` the fabric turns over on screen.
+func _set_back_side(back: bool, animate := false) -> void:
+	_view.set_back_side(back, animate)
 	_side_button.text = "Vorderseite" if back else "Rückseite"
 
 
@@ -672,6 +713,8 @@ func _handle_cmdline() -> void:
 	var stitch_code := ""
 	var steps := 0
 	var back := false
+	var flip := -1.0
+	var zoom := 0.0
 	for arg in OS.get_cmdline_user_args():
 		if arg.begins_with("--open="):
 			_open_image(arg.trim_prefix("--open="))
@@ -705,6 +748,15 @@ func _handle_cmdline() -> void:
 			_apply_style()
 		elif arg == "--back":
 			back = true
+		elif arg.begins_with("--zoom="):
+			zoom = arg.trim_prefix("--zoom=").to_float()
+		elif arg.begins_with("--flip="):
+			flip = arg.trim_prefix("--flip=").to_float()
+		elif arg.begins_with("--light="):
+			var light := arg.trim_prefix("--light=").split(",")
+			_light_azimuth.value = light[0].to_float()
+			if light.size() > 1:
+				_light_elevation.value = light[1].to_float()
 		elif arg == "--projects":
 			_show_projects.call_deferred()
 		elif arg.begins_with("--max-skip="):
@@ -723,10 +775,17 @@ func _handle_cmdline() -> void:
 		_enter_stitching(_project.pattern.thread_codes.find(stitch_code))
 		for i in steps:
 			_next_step()
+		var step := _project.session.current_step(_stitch_thread)
+		if zoom > 0.0 and step != null:
+			_view.focus_step(step, zoom)
 		if back:
 			_toggle_back_side()
+			if flip >= 0.0:
+				_view.hold_flip(flip)
 	if screenshot_path.is_empty():
 		return
+	if _view.is_flipping() and flip < 0.0:
+		await _view.flip_finished
 	for i in 3:
 		await get_tree().process_frame
 	# Low processor mode draws only when something changed, so ask for one more frame.

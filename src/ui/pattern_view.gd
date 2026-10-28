@@ -1,17 +1,19 @@
 class_name PatternView
 extends Control
-## Shows a pattern as a grid. Preview mode draws every cell as a coloured square; progress mode
-## draws only the stitched legs plus the current step and its stitch count; with `back_side` it
-## shows the back instead, mirrored as when the fabric is turned over. Drag to pan; pinch, trackpad or mouse
-## wheel to zoom; a short tap emits `tapped`.
+## Shows a pattern on fabric. The fabric and thread are 3D (StitchScene, rendered into a
+## SubViewport and drawn first); the marks for the current step are drawn on top in 2D, with the
+## same mapping from grid to screen. Preview mode shows every cell as a finished cross; progress
+## mode only the stitched legs plus the current step and its stitch count; with `back_side` it
+## shows the back instead, mirrored as when the fabric is turned over (set_back_side() can turn
+## it over with an animation). Drag to pan; pinch, trackpad or mouse wheel to zoom; a short tap
+## emits `tapped`.
 
 signal tapped
+## A flip animation has ended.
+signal flip_finished
 
-## Colour of empty cells (light Aida fabric).
-const FABRIC_COLOR := Color8(245, 241, 230)
-const GRID_COLOR := Color(0.0, 0.0, 0.0, 0.12)
-## Every 10th line is darker, as on printed charts.
-const GRID_MAJOR_COLOR := Color(0.0, 0.0, 0.0, 0.4)
+## Background of labels and counts (light Aida fabric).
+const FABRIC_COLOR := StitchScene.FABRIC_COLOR
 const HIGHLIGHT_COLOR := Color(1.0, 0.5, 0.05)
 ## Reference stitch of the position hint, and the left/right leg of its counting path.
 const HINT_COLOR := Color(0.1, 0.45, 0.95)
@@ -24,21 +26,13 @@ const THREAD_END_COLOR := Color(0.85, 0.15, 0.15)
 const THREAD_START_COLOR := Color(0.1, 0.6, 0.25)
 ## Below this cell size the thread markers have no text labels.
 const MIN_LABEL_CELL_PX := 14.0
-## Opacity and relative thickness of the legs still to stitch in the current step.
-const GHOST_ALPHA := 0.35
-const GHOST_WIDTH := 0.5
 const MIN_CELL_PX := 2.0
 const MAX_CELL_PX := 96.0
-## Below these cell sizes the grid lines are left out.
-const MIN_MINOR_GRID_PX := 6.0
-const MIN_MAJOR_GRID_PX := 3.0
 const FIT_MARGIN := 16.0
 const WHEEL_ZOOM := 1.15
 ## A touch that moves less than this is a tap.
 const TAP_SLOP := 12.0
-## Leg thickness and inset as parts of a cell.
-const LEG_WIDTH := 0.2
-const LEG_INSET := 0.12
+const FLIP_SECONDS := 0.7
 
 var pattern: Pattern
 ## Show the back of the fabric (progress mode only): the thread between the holes, mirrored
@@ -47,17 +41,30 @@ var pattern: Pattern
 var style := StitchStyle.new():
 	set(value):
 		style = value
+		if pattern != null:
+			_scene.set_pattern(pattern, _colors, style.slash_first)
+			_scene.set_states(_states)
+			_scene.set_ghost(_highlight)
 		queue_redraw()
-var back_side := false:
+var back_side: bool:
+	get:
+		return _back_side
 	set(value):
-		if value != back_side and pattern != null:
-			# Keep the column in the middle of the view in the middle once mirrored.
-			var middle := size.x / 2.0
-			_origin.x = middle - (pattern.width - (middle - _origin.x) / _cell_px) * _cell_px
-		back_side = value
-		queue_redraw()
+		set_back_side(value, false)
 
-var _texture: ImageTexture
+var _back_side := false
+var _viewport := SubViewport.new()
+var _scene := StitchScene.new()
+## While the fabric turns over: progress 0..1, and the view as it was when the flip began
+## (origin, and the world x of the column in the middle, the axis it turns about).
+var _flipping := false
+var _turn := 0.0:
+	set(value):
+		_turn = value
+		queue_redraw()
+var _turn_origin := Vector2.ZERO
+var _turn_pivot := 0.0
+var _flip_tween: Tween
 var _colors: Array[Color] = []
 ## StitchSession.Cell per cell in progress mode; empty in preview mode.
 var _states := PackedByteArray()
@@ -72,10 +79,7 @@ var _cell_px := 10.0
 ## Top left corner of the grid, in local coordinates.
 var _origin := Vector2.ZERO
 var _touches := {}  # touch index -> position
-## The back, from BackSide, in grid units: finished segments per thread, the current step's
-## segments still to stitch, and where threads start and end.
-var _back_lines: Array[PackedVector2Array] = []
-var _back_ghost := PackedVector2Array()
+## Where threads start and end on the back, holes in grid units (BackSide).
 var _back_starts := PackedVector2Array()
 var _back_ends := PackedVector2Array()
 var _tap_possible := false
@@ -87,9 +91,16 @@ var _pending_focus := []
 
 
 func _init() -> void:
-	texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	clip_contents = true
 	resized.connect(_on_resized)
+	_viewport.own_world_3d = true
+	_viewport.transparent_bg = true
+	_viewport.msaa_3d = Viewport.MSAA_4X
+	_viewport.gui_disable_input = true
+	# Renders whenever the app draws a frame; low processor mode only draws on change.
+	_viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	_viewport.add_child(_scene)
+	add_child(_viewport)
 
 
 ## Shows `p` in preview mode; with `keep_view` the zoom and position stay as they are.
@@ -98,15 +109,13 @@ func show_pattern(p: Pattern, palette: FlossPalette, keep_view := false) -> void
 	_colors.clear()
 	for code in p.thread_codes:
 		_colors.append(palette.find_code(code).color)
-	var image := Image.create_empty(p.width, p.height, false, Image.FORMAT_RGBA8)
-	for y in p.height:
-		for x in p.width:
-			var index := p.get_cell(x, y)
-			image.set_pixel(x, y, FABRIC_COLOR if index == Pattern.EMPTY else _colors[index])
-	_texture = ImageTexture.create_from_image(image)
 	_states = PackedByteArray()
 	_highlight = null
 	_hint = null
+	_scene.set_pattern(p, _colors, style.slash_first)
+	_scene.set_states(_states)
+	_scene.set_ghost(null)
+	_scene.set_back([], PackedVector2Array(), -1)
 	if not keep_view:
 		fit_to_view()
 	queue_redraw()
@@ -123,13 +132,14 @@ func show_progress(states: PackedByteArray, highlight: StitchStep, hint: Positio
 	_hint = hint
 	_thread_end = thread_end
 	_new_thread = new_thread
+	_scene.set_states(states)
+	_scene.set_ghost(highlight)
 	queue_redraw()
 
 
 ## Shows nothing (no project open).
 func clear() -> void:
 	pattern = null
-	_texture = null
 	show_preview()
 
 
@@ -137,10 +147,9 @@ func clear() -> void:
 ## `ghost` the current step's, `starts` and `ends` the holes where threads begin and end.
 func show_back(lines: Array[PackedVector2Array], ghost: PackedVector2Array,
 		starts: PackedVector2Array, ends: PackedVector2Array) -> void:
-	_back_lines = lines
-	_back_ghost = ghost
 	_back_starts = starts
 	_back_ends = ends
+	_scene.set_back(lines, ghost, _highlight.thread if _highlight != null else -1)
 	queue_redraw()
 
 
@@ -150,7 +159,60 @@ func show_preview() -> void:
 	_hint = null
 	_thread_end = Vector2i(-1, -1)
 	_new_thread = false
+	if pattern != null:
+		_scene.set_states(_states)
+		_scene.set_ghost(null)
 	queue_redraw()
+
+
+## Shows the back (or the front again); with `animate` the fabric turns over on screen.
+func set_back_side(value: bool, animate: bool) -> void:
+	if value == _back_side:
+		return
+	_stop_flip()
+	if pattern != null:
+		var middle := size.x / 2.0
+		if animate and _is_laid_out():
+			_flipping = true
+			_turn_origin = _origin
+			_turn_pivot = (middle - _origin.x) / _cell_px
+			_turn = 0.0
+			_flip_tween = create_tween()
+			_flip_tween.tween_property(self, "_turn", 1.0, FLIP_SECONDS).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+			_flip_tween.finished.connect(_stop_flip)
+		# Keep the column in the middle of the view in the middle once mirrored.
+		_origin.x = middle - (pattern.width - (middle - _origin.x) / _cell_px) * _cell_px
+	_back_side = value
+	queue_redraw()
+
+
+## Holds a running flip at `progress` (0..1), for screenshots.
+func hold_flip(progress: float) -> void:
+	if _flip_tween != null:
+		_flip_tween.kill()
+		_flip_tween = null
+	_turn = progress
+
+
+func is_flipping() -> bool:
+	return _flipping
+
+
+## Light for the fabric and thread, see StitchScene.set_light().
+func set_light(azimuth: float, elevation: float) -> void:
+	_scene.set_light(azimuth, elevation)
+	queue_redraw()
+
+
+func _stop_flip() -> void:
+	if not _flipping:
+		return
+	if _flip_tween != null:
+		_flip_tween.kill()
+		_flip_tween = null
+	_flipping = false
+	queue_redraw()
+	flip_finished.emit()
 
 
 ## Zooms so the whole pattern fits, centred.
@@ -214,19 +276,15 @@ func _on_resized() -> void:
 
 
 func _draw() -> void:
-	if pattern == null or _texture == null:
+	if pattern == null:
 		return
-	var grid_rect := Rect2(_origin, Vector2(pattern.width, pattern.height) * _cell_px)
-	var progress := not _states.is_empty()
-	if progress:
-		draw_rect(grid_rect, FABRIC_COLOR)
-	else:
-		draw_texture_rect(_texture, grid_rect, false)
-	_draw_grid(grid_rect)
-	if progress and back_side:
+	_update_scene()
+	draw_texture_rect(_viewport.get_texture(), Rect2(Vector2.ZERO, size), false)
+	if _flipping or _states.is_empty():
+		return
+	if back_side:
 		_draw_back()
-	elif progress:
-		_draw_stitches()
+	else:
 		if _highlight != null:
 			_draw_highlight(_highlight)
 		if _hint != null:
@@ -237,74 +295,28 @@ func _draw() -> void:
 			_draw_thread_start(_highlight)
 		if _highlight != null:
 			_draw_block_count(_highlight)
-	draw_rect(grid_rect, GRID_MAJOR_COLOR, false, 2.0)
 
 
-func _draw_grid(grid_rect: Rect2) -> void:
-	if _cell_px < MIN_MAJOR_GRID_PX:
-		return
-	var minor := PackedVector2Array()
-	var major := PackedVector2Array()
-	for x in range(1, pattern.width):
-		var px := _origin.x + _column_x(x) * _cell_px
-		if x % 10 == 0:
-			major.append_array([Vector2(px, grid_rect.position.y), Vector2(px, grid_rect.end.y)])
-		elif _cell_px >= MIN_MINOR_GRID_PX:
-			minor.append_array([Vector2(px, grid_rect.position.y), Vector2(px, grid_rect.end.y)])
-	for y in range(1, pattern.height):
-		var py := _origin.y + y * _cell_px
-		if y % 10 == 0:
-			major.append_array([Vector2(grid_rect.position.x, py), Vector2(grid_rect.end.x, py)])
-		elif _cell_px >= MIN_MINOR_GRID_PX:
-			minor.append_array([Vector2(grid_rect.position.x, py), Vector2(grid_rect.end.x, py)])
-	if not minor.is_empty():
-		draw_multiline(minor, GRID_COLOR)
-	if not major.is_empty():
-		draw_multiline(major, GRID_MAJOR_COLOR)
+## Matches the 3D camera to the 2D mapping (grid point g at _origin + g * _cell_px, mirrored on
+## the back), and turns the fabric while it flips. The viewport renders at the screen's pixel
+## density, so the thread stays sharp under canvas_items stretching.
+func _update_scene() -> void:
+	var density := get_viewport().get_final_transform().get_scale().x
+	_viewport.size = Vector2i((size * density).round().max(Vector2.ONE))
+	var origin := _turn_origin if _flipping else _origin
+	_scene.set_view((size / 2.0 - origin) / _cell_px, size.y / _cell_px)
+	if _flipping:
+		_scene.set_turn(not back_side, PI * _turn, _turn_pivot, size.x / _cell_px)
+	else:
+		_scene.set_turn(back_side, 0.0, 0.0, size.x / _cell_px)
 
 
-## Stitched legs of the visible cells, batched per thread colour.
-func _draw_stitches() -> void:
-	# Plain Arrays: they are references, so appending through `lines[thread]` works in place.
-	var lines: Array[Array] = []
-	for thread in _colors.size():
-		lines.append([])
-	var visible := _visible_cells()
-	for y in range(visible.position.y, visible.end.y):
-		for x in range(visible.position.x, visible.end.x):
-			var state := _states[y * pattern.width + x]
-			if state == StitchSession.Cell.NONE:
-				continue
-			var leg_rect := _leg_rect(x, y)
-			var thread_lines: Array = lines[pattern.get_cell(x, y)]
-			thread_lines.append_array(_leg(leg_rect, true))
-			if state == StitchSession.Cell.FULL:
-				thread_lines.append_array(_leg(leg_rect, false))
-	var width := maxf(1.0, _cell_px * LEG_WIDTH)
-	for thread in lines.size():
-		if not lines[thread].is_empty():
-			draw_multiline(PackedVector2Array(lines[thread]), _colors[thread], width)
-
-
-## The back: finished thread per colour, the current step's thread still to stitch as a ghost,
-## small knots where threads start (green) and end (red), and the frame, needle dot, thread
-## markers and stitch count of the current step as on the front.
+## The marks on the back (the thread itself is 3D): small knots where threads start (green) and
+## end (red), and the frame, needle dot, thread markers and stitch count of the current step as
+## on the front.
 func _draw_back() -> void:
-	var cell_width := maxf(LEG_WIDTH * 0.8, 1.0 / _cell_px)
-	# Grid units to screen, mirrored: hole x lands at width - x.
-	draw_set_transform(_origin + Vector2(pattern.width * _cell_px, 0.0), 0.0, Vector2(-_cell_px, _cell_px))
-	for thread in mini(_back_lines.size(), _colors.size()):
-		if not _back_lines[thread].is_empty():
-			draw_multiline(_back_lines[thread], _colors[thread], cell_width)
 	if _highlight != null:
-		var rect := _step_rect(_highlight).grow(maxf(2.0, _cell_px * 0.1))
-		draw_set_transform_matrix(Transform2D.IDENTITY)
-		draw_rect(rect, Color(HIGHLIGHT_COLOR, 0.15))
-		draw_rect(rect, HIGHLIGHT_COLOR, false, 3.0)
-		draw_set_transform(_origin + Vector2(pattern.width * _cell_px, 0.0), 0.0, Vector2(-_cell_px, _cell_px))
-		if not _back_ghost.is_empty():
-			draw_multiline(_back_ghost, Color(_colors[_highlight.thread], GHOST_ALPHA), cell_width * GHOST_WIDTH * 2.0)
-	draw_set_transform_matrix(Transform2D.IDENTITY)
+		_draw_frame(_highlight)
 	var knot := maxf(2.0, _cell_px * 0.14)
 	for hole in _back_starts:
 		draw_circle(_hole_point(hole), knot, THREAD_START_COLOR)
@@ -320,22 +332,17 @@ func _draw_back() -> void:
 		_draw_block_count(_highlight)
 
 
-## The current step: a frame around its cells, the legs still to stitch as ghosts, and a dot
-## where the needle comes up first.
+## The current step (its legs still to stitch are see-through in 3D): a frame around its cells
+## and a dot where the needle comes up first.
 func _draw_highlight(step: StitchStep) -> void:
-	var rect := _step_rect(step).grow(maxf(2.0, _cell_px * 0.1))
-	draw_rect(rect, Color(HIGHLIGHT_COLOR, 0.15))
-	draw_rect(rect, HIGHLIGHT_COLOR, false, 3.0)
-	var ghost := PackedVector2Array()
-	for x in step.cells:
-		var leg_rect := _leg_rect(x, step.row)
-		if step.kind != StitchStep.Kind.BACK:
-			ghost.append_array(_leg(leg_rect, true))
-		if step.kind != StitchStep.Kind.HALF:
-			ghost.append_array(_leg(leg_rect, false))
-	draw_multiline(ghost, Color(_colors[step.thread], GHOST_ALPHA),
-			maxf(1.0, _cell_px * LEG_WIDTH * GHOST_WIDTH))
+	_draw_frame(step)
 	draw_circle(_needle_start(step), maxf(3.0, _cell_px * 0.15), HIGHLIGHT_COLOR)
+
+
+func _draw_frame(step: StitchStep) -> void:
+	var rect := _step_rect(step).grow(maxf(2.0, _cell_px * 0.1))
+	draw_rect(rect, Color(HIGHLIGHT_COLOR, 0.12))
+	draw_rect(rect, HIGHLIGHT_COLOR, false, 3.0)
 
 
 ## How many stitches the current step has, in a badge just past the end the needle moves
@@ -464,18 +471,9 @@ func _hole_point(hole: Vector2) -> Vector2:
 	return _origin + Vector2(_column_x(hole.x), hole.y) * _cell_px
 
 
-## Where the needle comes up first in `step` (see StitchStyle): on the front at the end of the
-## inset leg, so the dot sits on the leg; on the back at the hole itself.
+## The hole where the needle comes up first in `step` (see StitchStyle).
 func _needle_start(step: StitchStep) -> Vector2:
-	var hole := style.needle_holes(step)[0]
-	if back_side:
-		return _hole_point(hole)
-	var first := _leg_rect(step.cells[0], step.row)
-	return first.position + (hole - Vector2(step.cells[0], step.row)) * first.size
-
-
-func _leg_rect(x: int, y: int) -> Rect2:
-	return _cell_rect(x, y).grow(-_cell_px * LEG_INSET)
+	return _hole_point(style.needle_holes(step)[0])
 
 
 func _step_rect(step: StitchStep) -> Rect2:
@@ -485,24 +483,10 @@ func _step_rect(step: StitchStep) -> Rect2:
 	return rect
 
 
-## The first leg (underneath) or the second (on top) in `rect`: "/" from the bottom left to the
-## top right, "\" from the top left to the bottom right, in the order of `style`.
-func _leg(rect: Rect2, first: bool) -> PackedVector2Array:
-	if first == style.slash_first:
-		return PackedVector2Array([Vector2(rect.position.x, rect.end.y), Vector2(rect.end.x, rect.position.y)])
-	return PackedVector2Array([rect.position, rect.end])
-
-
-## Cells at least partly on screen.
-func _visible_cells() -> Rect2i:
-	var from := (-_origin / _cell_px).floor()
-	var to := ((size - _origin) / _cell_px).ceil()
-	var start := Vector2i(clampi(int(from.x), 0, pattern.width), clampi(int(from.y), 0, pattern.height))
-	var end := Vector2i(clampi(int(to.x), 0, pattern.width), clampi(int(to.y), 0, pattern.height))
-	return Rect2i(start, end - start)
-
-
 func _gui_input(event: InputEvent) -> void:
+	if _flipping:
+		accept_event()
+		return
 	if event is InputEventScreenTouch:
 		if event.pressed:
 			_touches[event.index] = event.position

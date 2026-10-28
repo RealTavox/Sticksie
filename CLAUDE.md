@@ -28,8 +28,17 @@ item is resolved during normal work, delete its entry in the same change.
   mirrored by `PatternView.back_side`), where the needle comes up (`StitchStyle`, see Planner
   rules) and position hints
   (`PositionHint`: the nearest findable stitch to count from, any colour: the last stitch
-  made or the end of a run, never a stitch in the middle of a row of equal stitches), `ui/`
-  views (`PatternView` preview and progress mode with the current block's stitch count, `StitchPanel` step guidance, `ProjectBrowser` the
+  made or the end of a run, never a stitch in the middle of a row of equal stitches), `render/`
+  the 3D fabric and thread (`StitchScene`: orthographic camera, Aida plane, one MultiMesh
+  instance per leg or back stitch, soft shadows reusing the same MultiMeshes, the flip as a turn
+  about a vertical axis with a little perspective from `flip.gdshaderinc`; `StitchTextures`
+  makes the fabric and floss normal and shade maps procedurally on first use, in their own
+  normal convention, not Godot's NORMAL_MAP; instance colours are passed as sRGB because the
+  Compatibility renderer converts them itself), `ui/`
+  views (`PatternView` draws `StitchScene` from a SubViewport and its 2D marks on top with the
+  same grid-to-screen mapping; preview mode shows every cell as a finished cross, progress mode
+  the stitched legs and the current block's stitch count; `set_back_side(…, true)` animates the
+  flip), `StitchPanel` step guidance, `ProjectBrowser` the
   project list: open, rename, delete after a confirmation; the preview comes from
   `ProjectStore.preview()`, for now the source image, later meant to show the progress), `main.tscn`/`main.gd` the start screen),
   `tests/run_tests.gd`, plus `project.godot` and the `*.import` files next to resources (they
@@ -65,7 +74,10 @@ How to check a change; every fix and feature runs these. Godot binary:
    --steps=<n>` for the stitching screen after n confirmed steps, `--max-skip=<n>` to set the
    skip limit (-1: none), `--start=<top-left|top-right|bottom-left|bottom-right>` the start corner, `--settings` to open the settings dialog, `--projects` the project list, `--back` the back side while stitching,
    `--method=<danish|english>`, `--back-pass=<whole|blocks>`, `--max-block=<n>`, `--needle=<auto|bottom|top>`, `--first-leg=<slash|backslash>`
-   (both fix the style), `--advanced` with `--settings` for the advanced part. In zsh, pass each user
+   (both fix the style), `--advanced` with `--settings` for the advanced part, `--zoom=<cell px>`
+   to zoom in on the current step, `--light=<azimuth>,<elevation>` (degrees; azimuth clockwise
+   from the top) for the test light, `--flip=<0..1>` with `--back` to hold the flip animation
+   at that point. Screenshots wait for a running flip to end. In zsh, pass each user
    argument as its own word (an unsplit `"$args"` arrives as one argument and is ignored).
 
 Touch input (pan, pinch) and the native file dialog are not covered by these; check them on a
