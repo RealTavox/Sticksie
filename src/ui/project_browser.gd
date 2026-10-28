@@ -29,6 +29,7 @@ var _target := {}
 func _init() -> void:
 	super("Projekte")
 	fill_height = true
+	close_on_outside_tap = true
 	_list = VBoxContainer.new()
 	_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_list.add_theme_constant_override("separation", 8)

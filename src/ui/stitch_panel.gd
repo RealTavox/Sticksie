@@ -239,9 +239,7 @@ static func describe_offset(offset: Vector2i, reference: String) -> String:
 func _make_button(text: String, icon: ButtonIcons.Icon) -> Button:
 	var button := Button.new()
 	button.text = text
-	button.icon = ButtonIcons.button_icon(icon, OverlayWindow.ICON_PX)
-	button.add_theme_constant_override("icon_max_width", OverlayWindow.ICON_PX)
-	button.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
+	OverlayWindow.set_icon(button, icon)
 	button.focus_mode = Control.FOCUS_NONE
 	button.custom_minimum_size.y = BUTTON_HEIGHT
 	return button

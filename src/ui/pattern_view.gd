@@ -13,6 +13,12 @@ extends Control
 ## tap is ruled out), double tap for `double_tapped`, double tap with two fingers or double right
 ## click for `two_finger_double_tapped`; a swipe in from the left or right edge for
 ## `swiped_from_left` / `swiped_from_right`. `touched` comes at the start of every gesture.
+##
+## Pages: with a `back_page` (a picture of the overview while stitching) the swipe from the left
+## edge drags the page shown to the right, following the finger and standing still when it
+## does, with the back page coming in beneath; let go far or fast enough and it goes all the way
+## (then `swiped_from_left`), otherwise it springs back. slide_in() and slide_back() play the
+## same move on their own.
 
 signal tapped
 signal double_tapped
@@ -67,6 +73,16 @@ const SWIPE_PX := 90.0
 const FLIP_SECONDS := 0.7
 ## ensure_visible(…, true) glides there in this time.
 const PAN_SECONDS := 0.3
+## Page slides: the time for a whole screen width; the page beneath moves at this share of the
+## speed and is darkened up to PAGE_DIM while covered; a shadow this wide at the page's edge.
+const PAGE_SECONDS := 0.32
+const PAGE_PARALLAX := 0.3
+const PAGE_DIM := 0.35
+const PAGE_SHADOW_PX := 24.0
+## A swipe back goes through when let go past this share of the width or flicked to the right
+## faster than PAGE_FLICK_SPEED (pixels per second).
+const PAGE_COMMIT_SHARE := 0.4
+const PAGE_FLICK_SPEED := 700.0
 
 var pattern: Pattern
 ## Show the back of the fabric (progress mode only): the thread between the holes, mirrored
@@ -86,8 +102,22 @@ var back_side: bool:
 	set(value):
 		set_back_side(value, false)
 
+## Picture of the page a swipe from the left edge goes back to; null: the swipe only emits
+## swiped_from_left at its end.
+var back_page: Texture2D
+
 var _back_side := false
 var _viewport := SubViewport.new()
+## The page beneath while pages slide, and how far the page shown is moved to the right.
+var _under_page: Texture2D
+var _page_shift := 0.0:
+	set(value):
+		_page_shift = value
+		queue_redraw()
+var _page_tween: Tween
+## A swipe from the left edge is dragging the page; its last speed to the right.
+var _page_dragging := false
+var _page_speed := 0.0
 var _scene := StitchScene.new()
 ## While the fabric turns over: progress 0..1, and the view as it was when the flip began
 ## (origin, and the world x of the column in the middle, the axis it turns about).
@@ -297,6 +327,73 @@ func _stop_flip() -> void:
 	flip_finished.emit()
 
 
+## A picture of the fabric as shown now, without the 2D marks (the overview has none); null
+## where nothing is rendered (headless).
+func snapshot() -> ImageTexture:
+	if DisplayServer.get_name() == "headless":
+		return null
+	var image := _viewport.get_texture().get_image()
+	if image == null or image.is_empty():
+		return null
+	return ImageTexture.create_from_image(image)
+
+
+## Zoom and position, to put back with set_view_state(); a different size fits the pattern
+## instead.
+func view_state() -> Array:
+	return [_origin, _cell_px, size]
+
+
+func set_view_state(state: Array) -> void:
+	if state[2] != size:
+		fit_to_view()
+		return
+	_stop_pan()
+	_origin = state[0]
+	_cell_px = state[1]
+	queue_redraw()
+
+
+## The page shown now comes in from the right over `from` (a picture of the page before, may
+## be null), which moves away to the left.
+func slide_in(from: Texture2D) -> void:
+	_under_page = from
+	_page_shift = size.x
+	_animate_page(0.0)
+
+
+## The page shown now moves out to the right, uncovering `back_page`; returns once it has gone.
+## The page stays out until end_page_slide().
+func slide_back() -> void:
+	_under_page = back_page
+	await _animate_page(size.x)
+
+
+## Shows the page as it is again, after slide_back() or a swipe back.
+func end_page_slide() -> void:
+	if _page_tween != null:
+		_page_tween.kill()
+	_page_dragging = false
+	_under_page = null
+	_page_shift = 0.0
+
+
+func is_page_sliding() -> bool:
+	return _page_dragging or (_page_tween != null and _page_tween.is_running())
+
+
+## Moves the page to `target` (0: in place, size.x: gone), slower the further it goes.
+func _animate_page(target: float) -> void:
+	if _page_tween != null:
+		_page_tween.kill()
+	var seconds := maxf(PAGE_SECONDS * absf(target - _page_shift) / maxf(size.x, 1.0), 0.01)
+	_page_tween = create_tween()
+	_page_tween.tween_property(self, "_page_shift", target, seconds).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+	await _page_tween.finished
+	if target == 0.0:
+		_under_page = null
+
+
 ## Zooms so the whole pattern fits, centred.
 func fit_to_view() -> void:
 	if pattern == null or pattern.width == 0 or size.x <= 0.0 or size.y <= 0.0:
@@ -408,6 +505,9 @@ func _draw() -> void:
 	if pattern == null:
 		return
 	_update_scene()
+	if _page_shift != 0.0:
+		_draw_under_page()
+		draw_set_transform(Vector2(_page_shift, 0.0))
 	draw_texture_rect(_viewport.get_texture(), Rect2(Vector2.ZERO, size), false)
 	_taken.clear()
 	if _flipping or _states.is_empty():
@@ -425,6 +525,24 @@ func _draw() -> void:
 			_draw_thread_start(_highlight)
 		if _highlight != null:
 			_draw_block_count(_highlight)
+
+
+## While pages slide: the page beneath (moved less and darkened while covered), the background
+## of the page shown, and its shadow on the page beneath.
+func _draw_under_page() -> void:
+	var background := RenderingServer.get_default_clear_color()
+	var covered := 1.0 - clampf(_page_shift / maxf(size.x, 1.0), 0.0, 1.0)
+	var tint := Color.WHITE.darkened(PAGE_DIM * covered)
+	var under := Rect2(Vector2((_page_shift - size.x) * PAGE_PARALLAX, 0.0), size)
+	draw_rect(under, background * tint)
+	if _under_page != null:
+		draw_texture_rect(_under_page, under, false, tint)
+	var edge := _page_shift
+	var shadow := Color(0.0, 0.0, 0.0, 0.35 * covered)
+	draw_polygon(PackedVector2Array([Vector2(edge - PAGE_SHADOW_PX, 0.0), Vector2(edge, 0.0),
+			Vector2(edge, size.y), Vector2(edge - PAGE_SHADOW_PX, size.y)]),
+			PackedColorArray([Color(shadow, 0.0), shadow, shadow, Color(shadow, 0.0)]))
+	draw_rect(Rect2(Vector2(edge, 0.0), size), background)
 
 
 ## Matches the 3D camera to the 2D mapping (grid point g at _origin + g * _cell_px, mirrored on
@@ -779,16 +897,23 @@ func _on_touch(event: InputEventScreenTouch) -> void:
 		if _touches.is_empty():
 			touched.emit()
 			_gesture_fingers = 0
-			_gesture_moved = _flipping
+			_gesture_moved = _flipping or is_page_sliding()
 			_gesture_start_msec = Time.get_ticks_msec()
 			_gesture_edge = 0
 			if event.position.x < EDGE_PX:
 				_gesture_edge = -1
+				if back_page != null and not _gesture_moved:
+					_page_dragging = true
+					_page_speed = 0.0
+					_under_page = back_page
 			elif event.position.x > size.x - EDGE_PX:
 				_gesture_edge = 1
 		_touches[event.index] = event.position
 		_touch_starts[event.index] = event.position
 		_gesture_fingers = maxi(_gesture_fingers, _touches.size())
+		if _page_dragging and _touches.size() > 1:
+			_page_dragging = false
+			_animate_page(0.0)  # A second finger: not a swipe back after all.
 		return
 	if not _touches.has(event.index):
 		return
@@ -808,6 +933,10 @@ func _on_drag(event: InputEventScreenDrag) -> void:
 	_touches[event.index] = event.position
 	if event.position.distance_to(_touch_starts[event.index]) > TAP_SLOP:
 		_gesture_moved = true
+	if _page_dragging:
+		_page_shift = clampf(event.position.x - _touch_starts[event.index].x, 0.0, size.x)
+		_page_speed = event.velocity.x
+		return
 	if _flipping or (_gesture_edge != 0 and _gesture_fingers == 1):
 		return  # An edge swipe doesn't pan.
 	if _touches.size() == 1:
@@ -826,6 +955,12 @@ func _on_drag(event: InputEventScreenDrag) -> void:
 
 ## All fingers are up: an edge swipe, a tap or a two-finger tap, or nothing (panned, held).
 func _end_gesture(start: Vector2, end: Vector2) -> void:
+	if _page_dragging:
+		_page_dragging = false
+		if _gesture_moved:
+			_end_page_drag()
+			return
+		end_page_slide()  # Only a tap at the edge.
 	if _flipping:
 		return
 	if _gesture_edge != 0 and _gesture_fingers == 1:
@@ -844,6 +979,15 @@ func _end_gesture(start: Vector2, end: Vector2) -> void:
 			two_finger_double_tapped.emit()
 		else:
 			_two_finger_tap_msec = now
+
+
+## The swipe back was let go: on through, or back.
+func _end_page_drag() -> void:
+	if _page_shift > size.x * PAGE_COMMIT_SHARE or _page_speed > PAGE_FLICK_SPEED:
+		await _animate_page(size.x)
+		swiped_from_left.emit()
+	else:
+		_animate_page(0.0)
 
 
 ## A tap waits for a second one; together they make a double tap.

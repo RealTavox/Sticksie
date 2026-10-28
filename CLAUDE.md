@@ -23,7 +23,8 @@ item is resolved during normal work, delete its entry in the same change.
   `settings.cfg` next to the projects (light direction and height in section `view`, default from the top left at 55°, set in the
   advanced settings; skip limit, start corner or automatic, stitch method, block size, the advanced
   stitch style; not saved in the project file, pushed into the open project; plus the touch or
-  desktop layout in section `ui`, default touch on mobile); `palette/` thread colours and Lab matching, `pattern/` the `Pattern`
+  desktop layout in section `ui`, default touch on mobile, and which touch panels are open while
+  stitching, closed until opened, then as left); `palette/` thread colours and Lab matching, `pattern/` the `Pattern`
   resource, `import/` PNG → pattern, `planner/` Danish stitch order (`StitchPlanner` →
   `StitchStep`s), `stitching/` progress per thread (`StitchSession`), the back of the fabric
   (`BackSide`: the thread between the needle holes, worked out from the planned steps; drawn
@@ -51,7 +52,10 @@ item is resolved during normal work, delete its entry in the same change.
   flip; gestures for touch and mouse: one or two fingers / right mouse drag pan, pinch / wheel
   zoom, tap = next (held back `DOUBLE_TAP_SECONDS` to rule out a double tap), double tap = back,
   two-finger double tap / double right click = new thread, swipe in from the right edge = flip,
-  from the left edge = overview; `set_covered()` keeps steps clear of overlays), `StitchPanel`
+  from the left edge = overview (while stitching it drags the page along with the finger over a
+  picture of the overview, `back_page`, and goes or springs back on release; `slide_in()` /
+  `slide_back()` play the same move for entering stitching and the Übersicht button, and the
+  overview's zoom is put back on return); `set_covered()` keeps steps clear of overlays), `StitchPanel`
   step guidance (texts in `info`, buttons in `controls`, so the touch layout can split them),
   `RoundButton` the round see-through touch buttons (lit by `round_button.gdshader` from the
   same light as the fabric, `tint_color` when on: the block colour while stitching, blue in the overview, symbols from `ButtonIcons` distance functions, tooltip on long press; `ButtonIcons.button_icon()`
@@ -95,7 +99,9 @@ item is resolved during normal work, delete its entry in the same change.
   rows light to dark; or as a list with number and name sorted by number (`by_number()`: B5200,
   Blanc, Ecru, then numeric), and/or only the project's colours
   moved together, every skein gliding to its new place or fading out; choosing one shrinks the others away, then "Ersetzen" calls
-  `StitchProject.replace_color()` (colour list rows; "Auslassen" fades the whole row),
+  `StitchProject.replace_color()` (colour list rows; "Auslassen" fades the whole row); a touch outside the picker cancels
+  it, as a tap beside the project list closes it; "Ersetzen", "Übernehmen" and the stitch button
+  are blue via `OverlayWindow.make_primary()`,
   `tests/run_tests.gd`, plus `project.godot` and the `*.import` files next to resources (they
   hold import settings: `data/threads/dmc-floss.csv` uses the "keep" importer so it isn't
   turned into a translation, `samples/*.png` use the "image" importer so `load()` returns an
@@ -119,7 +125,7 @@ How to check a change; every fix and feature runs these. Godot binary:
 2. `$G --headless --path . --script res://tests/run_tests.gd`: prints "All tests passed."
    and exits 0. Plain checks without a framework (Lab/CIEDE2000 against Sharma's reference
    pairs, DMC palette, importing the sample, stitch planner incl. that every cell of the sample
-   is crossed exactly once, stitching progress, position hints and their wording, view gestures fed as touch events).
+   is crossed exactly once, stitching progress, position hints and their wording, view gestures fed as touch events, incl. the swipe back dragging the page).
 3. `$G --headless --path . --quit-after 120 -- --projects-dir=<scratch dir> --open=res://samples/hypsi_anhaenger.png --stitch=3837 --steps=7 2>&1 | grep -E "ERROR|WARNING"`:
    no output. Always pass `--projects-dir` with a scratch folder: every run that opens an image
    saves a project, and without it that lands in the user's real projects.

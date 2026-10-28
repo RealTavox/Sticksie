@@ -5,7 +5,8 @@ extends Control
 ## `buttons` at the bottom, centred over a dimmed screen that takes every touch and key. Opening
 ## it slides it up a little while it fades in, closing slides it back down while it fades out.
 
-## The window starts closing (its close button, Escape or close()).
+## The window starts closing (its close button, Escape, a tap outside with
+## `close_on_outside_tap`, or close()).
 signal closed
 
 const PANEL_COLOR := Color(0.13, 0.12, 0.11, 0.84)
@@ -18,6 +19,8 @@ const MARGIN := 12.0
 const BUTTON_HEIGHT := 48.0
 const ICON_PX := 24
 const TITLE_FONT_SIZE := 18
+## Background of a window's or row's main button (make_primary()): the round buttons' blue.
+const PRIMARY_COLOR := RoundButton.DEFAULT_TINT
 
 var content := VBoxContainer.new()
 var buttons := HBoxContainer.new()
@@ -27,6 +30,8 @@ var max_width := 640.0
 var fill_height := false
 ## Screen parts kept free for a notch or home bar: left, top, right, bottom.
 var safe_area := Vector4.ZERO
+## A tap beside the panel closes the window (as its close button does).
+var close_on_outside_tap := false
 
 var _panel := PanelContainer.new()
 var _title := Label.new()
@@ -89,12 +94,33 @@ static func make_button(text: String, icon: int, on_pressed: Callable) -> Button
 	var button := Button.new()
 	button.text = text
 	if icon >= 0:
-		button.icon = ButtonIcons.button_icon(icon, ICON_PX)
-		button.add_theme_constant_override("icon_max_width", ICON_PX)
-		button.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
+		set_icon(button, icon)
 	button.custom_minimum_size = Vector2(BUTTON_HEIGHT, BUTTON_HEIGHT)
 	button.focus_mode = Control.FOCUS_NONE
 	button.pressed.connect(on_pressed)
+	return button
+
+
+## Puts the white symbol `icon` (ButtonIcons.Icon) in front of the button's text.
+static func set_icon(button: Button, icon: int) -> void:
+	button.icon = ButtonIcons.button_icon(icon, ICON_PX)
+	button.add_theme_constant_override("icon_max_width", ICON_PX)
+	button.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
+
+
+## Gives `button` the blue background of a main action, lighter under the mouse, darker while
+## pressed, faded while disabled; the theme's shape and margins stay.
+static func make_primary(button: Button) -> Button:
+	var colors := {"normal": PRIMARY_COLOR, "hover": PRIMARY_COLOR.lightened(0.12),
+			"pressed": PRIMARY_COLOR.darkened(0.15), "hover_pressed": PRIMARY_COLOR.darkened(0.1),
+			"disabled": Color(PRIMARY_COLOR, 0.35)}
+	for state: String in colors:
+		var style := button.get_theme_stylebox(state, "Button").duplicate() as StyleBoxFlat
+		if style == null:
+			style = StyleBoxFlat.new()
+			style.set_corner_radius_all(4)
+		style.bg_color = colors[state]
+		button.add_theme_stylebox_override(state, style)
 	return button
 
 
@@ -160,6 +186,14 @@ func fit() -> void:
 
 func _draw() -> void:
 	draw_rect(Rect2(Vector2.ZERO, size), Color(DIM_COLOR, DIM_COLOR.a * _dim))
+
+
+func _gui_input(event: InputEvent) -> void:
+	var mouse := event as InputEventMouseButton
+	if (close_on_outside_tap and mouse != null and mouse.pressed and mouse.button_index == MOUSE_BUTTON_LEFT
+			and not _panel.get_rect().has_point(mouse.position)):
+		close()
+		accept_event()
 
 
 func _unhandled_key_input(event: InputEvent) -> void:

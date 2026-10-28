@@ -48,7 +48,9 @@ func _init() -> void:
 			_grid.set_view(_list_button.button_pressed, _project_button.button_pressed))
 		view_row.add_child(button)
 	_list_button.text = "Als Liste"
+	OverlayWindow.set_icon(_list_button, ButtonIcons.Icon.LIST)
 	_project_button.text = "Nur Farben aus diesem Projekt"
+	OverlayWindow.set_icon(_project_button, ButtonIcons.Icon.FILTER)
 
 	_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
@@ -64,12 +66,15 @@ func _init() -> void:
 	add_child(buttons)
 	var cancel := Button.new()
 	cancel.text = "Abbrechen"
+	OverlayWindow.set_icon(cancel, ButtonIcons.Icon.CLOSE)
 	cancel.custom_minimum_size.y = BUTTON_HEIGHT
 	cancel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	cancel.focus_mode = Control.FOCUS_NONE
 	cancel.pressed.connect(cancelled.emit)
 	buttons.add_child(cancel)
 	_replace_button.text = "Ersetzen"
+	OverlayWindow.set_icon(_replace_button, ButtonIcons.Icon.CHECK)
+	OverlayWindow.make_primary(_replace_button)
 	_replace_button.custom_minimum_size.y = BUTTON_HEIGHT
 	_replace_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_replace_button.focus_mode = Control.FOCUS_NONE

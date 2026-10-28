@@ -179,6 +179,12 @@ var _thread_done_before := false
 ## The colour just finished, struck through in the list once the overview's bar has filled.
 var _strike_code := ""
 var _strikes := {}  # code -> StrikeLine
+## A touch outside the open colour picker closed it; the rest of that touch (and its emulated
+## mouse twin) is swallowed.
+var _eating_pointer := false
+## Zoom and position of the overview when stitching began, so going back shows it as it was
+## (and as the picture the page slides used).
+var _overview_view := []
 
 
 func _ready() -> void:
@@ -219,7 +225,7 @@ func _build_ui() -> void:
 	_projects_button = _make_toolbar_button("Projekte", _show_projects, ButtonIcons.Icon.PROJECTS, false)
 	_toolbar.add_child(_projects_button)
 	_toolbar.add_child(_make_toolbar_button("Einstellungen", _show_settings, ButtonIcons.Icon.GEAR, false))
-	_overview_button = _make_toolbar_button("Übersicht", _leave_stitching, ButtonIcons.Icon.OVERVIEW)
+	_overview_button = _make_toolbar_button("Übersicht", _slide_to_overview, ButtonIcons.Icon.OVERVIEW)
 	_overview_button.visible = false
 	_toolbar.add_child(_overview_button)
 	_side_button = _make_toolbar_button("Rückseite", _toggle_back_side, ButtonIcons.Icon.FLIP)
@@ -237,7 +243,10 @@ func _build_ui() -> void:
 	_view.double_tapped.connect(_on_view_gesture.bind(_previous_step))
 	_view.two_finger_double_tapped.connect(_on_view_gesture.bind(_toggle_new_thread))
 	_view.swiped_from_right.connect(_on_view_gesture.bind(_swipe_side))
-	_view.swiped_from_left.connect(_on_view_gesture.bind(_leave_stitching))
+	# The swipe back already slid the page away, so it counts even after a touch closed the menu.
+	_view.swiped_from_left.connect(func() -> void:
+		_swallow_tap = false
+		_leave_stitching())
 	_view.touched.connect(_on_view_touched)
 
 	_side = VBoxContainer.new()
@@ -364,7 +373,10 @@ func _make_overlay_panel() -> PanelContainer:
 func _make_round_button(icon: ButtonIcons.Icon, tooltip: String, panel: Control) -> RoundButton:
 	var button := RoundButton.new(icon, tooltip, ROUND_BUTTON_PX)
 	button.toggle_mode = true
-	button.toggled.connect(func(on: bool) -> void: _set_overlay(panel, button, on))
+	button.toggled.connect(func(on: bool) -> void:
+		_set_overlay(panel, button, on)
+		if _stitch_thread >= 0 and panel != _menu_panel:
+			Preferences.set_stitch_panels(_list_button.button_pressed, _text_button.button_pressed))
 	_touch_root.add_child(button)
 	return button
 
@@ -628,10 +640,10 @@ func _build_settings_dialog() -> void:
 	_settings_dialog = OverlayWindow.new("Einstellungen")
 	_settings_dialog.buttons.add_child(OverlayWindow.make_button("Abbrechen", ButtonIcons.Icon.CLOSE,
 			_settings_dialog.close))
-	_settings_dialog.buttons.add_child(OverlayWindow.make_button("Übernehmen", ButtonIcons.Icon.CHECK,
-			func() -> void:
+	_settings_dialog.buttons.add_child(OverlayWindow.make_primary(OverlayWindow.make_button("Übernehmen",
+			ButtonIcons.Icon.CHECK, func() -> void:
 				_apply_settings()
-				_settings_dialog.close()))
+				_settings_dialog.close())))
 	_settings_dialog.closed.connect(func() -> void:
 		_restore_light()
 		_restore_overlays())
@@ -889,6 +901,13 @@ func _open_overview_panels() -> void:
 		_set_overlay(_text_panel, _text_button, true)
 
 
+## Stitching starts with the touch panels open or closed as they were left last time.
+func _open_stitch_panels() -> void:
+	if _touch:
+		_set_overlay(_list_panel, _list_button, Preferences.stitch_list_open())
+		_set_overlay(_text_panel, _text_button, Preferences.stitch_text_open())
+
+
 func _swipe_side() -> void:
 	if _stitch_thread >= 0:
 		_toggle_back_side()
@@ -899,6 +918,26 @@ func _show_message(text: String) -> void:
 	_info_label.text = text
 	if _touch and _stitch_thread < 0:
 		_set_overlay(_text_panel, _text_button, true)
+
+
+## While the colour picker is open, a touch outside it cancels it and does nothing else.
+func _input(event: InputEvent) -> void:
+	if not (event is InputEventScreenTouch or event is InputEventScreenDrag
+			or event is InputEventMouseButton or event is InputEventMouseMotion):
+		return
+	if _eating_pointer:
+		get_viewport().set_input_as_handled()
+		if (event is InputEventScreenTouch or event is InputEventMouseButton) and not event.is_pressed():
+			# Its twin (touch or emulated mouse) comes in the same frame.
+			(func() -> void: _eating_pointer = false).call_deferred()
+		return
+	var press: bool = ((event is InputEventScreenTouch and event.pressed) or (event is InputEventMouseButton
+			and event.pressed and event.button_index == MOUSE_BUTTON_LEFT))
+	if not press or not _picker_open or _list_host.get_global_rect().has_point(event.position):
+		return
+	_eating_pointer = true
+	get_viewport().set_input_as_handled()
+	_close_picker("", "")
 
 
 func _unhandled_key_input(event: InputEvent) -> void:
@@ -1151,6 +1190,7 @@ func _make_color_row(floss: FlossColor, count: int) -> Control:
 	stitch_button.focus_mode = Control.FOCUS_NONE
 	stitch_button.disabled = thread < 0
 	stitch_button.pressed.connect(_enter_stitching.bind(thread))
+	OverlayWindow.make_primary(stitch_button)
 	row.add_child(stitch_button)
 	# A left-out colour stays fabric: the whole row fades, only the box stays clear to undo it.
 	if left_out:
@@ -1267,8 +1307,12 @@ func _on_fabric_toggled(pressed: bool, code: String) -> void:
 	_save()
 
 
+## The stitching page slides in from the right over a picture of the overview, which a swipe
+## from the left edge or Übersicht brings back.
 func _enter_stitching(thread: int) -> void:
 	_close_picker_now()
+	var overview := _view.snapshot()
+	_overview_view = _view.view_state()
 	_overall_before = _project.session.leg_progress()
 	_thread_done_before = _project.session.current_step(thread) == null
 	_strike_code = ""
@@ -1280,6 +1324,17 @@ func _enter_stitching(thread: int) -> void:
 	# After zooming, so the reference stitch is panned into view as well.
 	_refresh_stitching()
 	_update_progress()
+	_open_stitch_panels()
+	_view.back_page = overview
+	_view.slide_in(overview)
+
+
+## Übersicht: the stitching page slides away to the right, then the overview takes over.
+func _slide_to_overview() -> void:
+	if _stitch_thread < 0 or _view.is_page_sliding():
+		return
+	await _view.slide_back()
+	_leave_stitching()
 
 
 ## Back to the overview. Its bar starts where the project was when stitching began and fills up
@@ -1299,6 +1354,11 @@ func _leave_stitching() -> void:
 	_update_visibility()
 	_set_back_side(false)
 	_view.show_preview()
+	_view.back_page = null
+	if not _overview_view.is_empty():
+		_view.set_view_state(_overview_view)
+		_overview_view = []
+	_view.end_page_slide()
 	_show_info()
 	_fill_color_list()
 	_open_overview_panels()
@@ -1652,7 +1712,8 @@ func _handle_cmdline() -> void:
 		_show_finale()
 	if screenshot_path.is_empty():
 		return
-	while (not _overlay_moving.is_empty() or _view.is_panning() or _settings_dialog.is_animating()
+	while (not _overlay_moving.is_empty() or _view.is_panning() or _view.is_page_sliding()
+			or _settings_dialog.is_animating()
 			or _project_browser.is_animating()):
 		await get_tree().process_frame
 	if _view.is_flipping() and flip < 0.0:

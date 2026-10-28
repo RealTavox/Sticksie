@@ -115,6 +115,21 @@ static func set_touch_mode(value: bool) -> void:
 	_store("touch", value, "ui")
 
 
+## Which touch panels are open while stitching: the stitching buttons' and the texts'. Closed
+## until the user opens them; each stays as it was left for the next time.
+static func stitch_list_open() -> bool:
+	return bool(_load().get_value("ui", "stitch_list_open", false))
+
+
+static func stitch_text_open() -> bool:
+	return bool(_load().get_value("ui", "stitch_text_open", false))
+
+
+static func set_stitch_panels(list_open: bool, text_open: bool) -> void:
+	_store("stitch_list_open", list_open, "ui")
+	_store("stitch_text_open", text_open, "ui")
+
+
 static func path() -> String:
 	return ProjectStore.directory.path_join("settings.cfg")
 

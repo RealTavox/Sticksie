@@ -5,7 +5,7 @@ class_name ButtonIcons
 ## units of the button's disc: (0, 0) is its centre, 1 its rim, y points down. Each mask is
 ## made once and cached.
 
-enum Icon { MENU, TEXT, NEEDLE, SPOOL, PIN, IMAGE, FOLDER, PROJECTS, GEAR, PENCIL, TRASH, CLOSE, CHECK, OVERVIEW, FLIP, BACK, NEW_THREAD }
+enum Icon { MENU, TEXT, NEEDLE, SPOOL, PIN, IMAGE, FOLDER, PROJECTS, GEAR, PENCIL, TRASH, CLOSE, CHECK, OVERVIEW, FLIP, BACK, NEW_THREAD, LIST, FILTER }
 
 const SIZE := 128
 
@@ -224,6 +224,17 @@ static func distance(icon: Icon, p: Vector2) -> float:
 			const SHRINK := 1.15
 			var needle := distance(Icon.NEEDLE, (p + Vector2(0.06, 0.06)) * SHRINK) / SHRINK - 0.025
 			return minf(maxf(needle, 0.07 - plus), plus)
+		Icon.LIST:
+			# Three lines, each with a dot in front.
+			var d := INF
+			for y in [-0.25, 0.0, 0.25]:
+				d = minf(d, (p - Vector2(-0.3, y)).length() - 0.065)
+				d = minf(d, _capsule(p, Vector2(-0.12, y), Vector2(0.36, y), 0.05))
+			return d
+		Icon.FILTER:
+			# A funnel: only some go through.
+			var funnel := _triangle(p, Vector2(-0.36, -0.3), Vector2(0.36, -0.3), Vector2(0.0, 0.12)) - 0.04
+			return minf(funnel, _box(p, Vector2(0.0, 0.16), Vector2(0.07, 0.2), 0.03))
 	return INF
 
 

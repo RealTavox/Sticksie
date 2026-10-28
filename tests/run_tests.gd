@@ -43,6 +43,7 @@ func _initialize() -> void:
 	# The root joins the tree only once the main loop runs; gestures need it for their timers.
 	await process_frame
 	_test_gestures()
+	await _test_page_swipe()
 	if _failures == 0:
 		print("All tests passed.")
 	else:
@@ -1009,6 +1010,34 @@ func _test_gestures() -> void:
 	_check(counts.two_finger_double_tapped == 1, "double tap with two fingers")
 	_check(counts.tapped + counts.double_tapped == 1, "two-finger taps are no one-finger taps")
 	_check(counts.touched == 9, "every gesture starts with touched, got %d" % counts.touched)
+	view.free()
+
+
+## With a page to go back to, the swipe from the left edge drags the page along with the finger;
+## let go early it springs back, let go far it goes and only then emits swiped_from_left.
+func _test_page_swipe() -> void:
+	var view := PatternView.new()
+	root.add_child(view)
+	view.size = Vector2(400, 600)
+	view.back_page = ImageTexture.create_from_image(Image.create_empty(4, 4, false, Image.FORMAT_RGBA8))
+	var swiped := [0]
+	view.swiped_from_left.connect(func() -> void: swiped[0] += 1)
+	_touch(view, 0, Vector2(10, 300), true)
+	_drag(view, 0, Vector2(60, 302))
+	_drag(view, 0, Vector2(110, 305))
+	_check(is_equal_approx(view._page_shift, 100.0), "the page follows the finger, got %.1f" % view._page_shift)
+	_drag(view, 0, Vector2(110, 305))
+	_check(is_equal_approx(view._page_shift, 100.0), "the page stands while the finger does")
+	_touch(view, 0, Vector2(110, 305), false)
+	await create_timer(PatternView.PAGE_SECONDS + 0.2).timeout
+	_check(swiped[0] == 0 and view._page_shift == 0.0, "a short swipe back springs back")
+	_touch(view, 0, Vector2(10, 300), true)
+	_drag(view, 0, Vector2(150, 300))
+	_drag(view, 0, Vector2(250, 300))
+	_touch(view, 0, Vector2(250, 300), false)
+	_check(swiped[0] == 0, "the swipe back waits for the page to go")
+	await create_timer(PatternView.PAGE_SECONDS + 0.2).timeout
+	_check(swiped[0] == 1 and view._page_shift == 400.0, "a long swipe back goes all the way")
 	view.free()
 
 
