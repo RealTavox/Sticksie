@@ -39,7 +39,10 @@ item is resolved during normal work, delete its entry in the same change.
 - Data: `data/threads/dmc-floss.csv` (DMC palette, CC BY 4.0, source and credit in
   `data/threads/SOURCE.md`; the credit must stay visible in the app). `samples/` holds test
   images.
-- Generated / not project code: `.godot/`. (Hands-off paths are in `USER_WORKFLOW.md`.)
+- Generated / not project code: `.godot/`; `addons/godot_ai/` (third-party Godot AI MCP
+  add-on, v4.3.1, MIT; update it only with the dock's Update button, never by extracting over
+  it). It registers the autoload `_mcp_game_helper`, which only acts while a debugger is
+  attached and sits idle in release builds. (Hands-off paths are in `USER_WORKFLOW.md`.)
 - List paths are relative to the repo root.
 
 ### Verification
