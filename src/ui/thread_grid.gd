@@ -3,8 +3,8 @@ extends Control
 ## Thread colours to choose from, as skeins standing on stairs: the loop points up, and the
 ## square is lengthened by the loop's length so the loop of the skein in front covers only that
 ## part and a whole square stays visible. As a grid, rows hold similar hues (greys first), each
-## from light on the left to dark on the right; as a list, the same order one below the other
-## with number and name. Optionally only the project's colours, moved together. Switching glides
+## from light on the left to dark on the right; as a list, one below the other by number (see
+## by_number()), with number and name, since a list is for finding a known number. Optionally only the project's colours, moved together. Switching glides
 ## every skein to its new place and fades out the ones that go. Tapping a colour chooses it: the
 ## others shrink away and it gets its number and name; tapping again brings them back.
 
@@ -143,6 +143,21 @@ static func arrange(colors: Array[FlossColor], columns: int, gap_after_greys := 
 	return result
 
 
+## `colors` sorted by their number: named ones first (B5200, Blanc, Ecru, alphabetically), then
+## the numbered ones in numeric order.
+static func by_number(colors: Array[FlossColor]) -> Array[FlossColor]:
+	var sorted := colors.duplicate()
+	sorted.sort_custom(func(a: FlossColor, b: FlossColor) -> bool:
+		var a_number := a.code.is_valid_int()
+		var b_number := b.code.is_valid_int()
+		if a_number != b_number:
+			return b_number
+		if a_number:
+			return a.code.to_int() < b.code.to_int()
+		return a.code.naturalnocasecmp_to(b.code) < 0)
+	return sorted
+
+
 static func _hue(floss: FlossColor) -> float:
 	return fposmod(rad_to_deg(atan2(floss.lab.z, floss.lab.y)) - HUE_START, 360.0)
 
@@ -156,9 +171,7 @@ func _layout(animate: bool) -> void:
 			shown.append(floss)
 	var grid_columns := maxi(1, int((size.x + GAP) / (ACROSS + GAP)))
 	# The project's few colours sit together, without a gap after the greys.
-	_cells = arrange(shown, grid_columns, not _project_only)
-	if _list:
-		_cells = _cells.filter(func(floss: FlossColor) -> bool: return floss != null)
+	_cells = by_number(shown) if _list else arrange(shown, grid_columns, not _project_only)
 	_columns = 1 if _list else grid_columns
 	var targets := {}
 	for i in _cells.size():

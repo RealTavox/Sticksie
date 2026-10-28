@@ -38,6 +38,7 @@ func _initialize() -> void:
 	_test_color_replacement()
 	_test_format_2_loads()
 	_test_picker_order()
+	_test_leg_progress()
 	# The root joins the tree only once the main loop runs; gestures need it for their timers.
 	await process_frame
 	_test_gestures()
@@ -917,12 +918,30 @@ func _test_format_2_loads() -> void:
 
 
 ## The colour picker: greys first, then hues; every row from light to dark.
+func _test_leg_progress() -> void:
+	var pattern := _pattern(["00", "1."])
+	var session := StitchSession.new(pattern)
+	_check(session.leg_progress(0) == 0.0 and session.leg_progress() == 0.0, "nothing stitched yet")
+	session.advance(0)
+	_check(is_equal_approx(session.leg_progress(0), 0.5), "half stitches are half of the colour: %s" % session.leg_progress(0))
+	session.advance(0)
+	_check(is_equal_approx(session.leg_progress(0), 1.0), "return pass finishes the colour")
+	_check(is_equal_approx(session.leg_progress(), 4.0 / 6.0), "whole project counts every colour: %s" % session.leg_progress())
+
+
 func _test_picker_order() -> void:
 	const COLUMNS := 16
 	var colors := FlossPalette.dmc().colors
 	var cells := ThreadGrid.arrange(colors, COLUMNS)
 	var shown := cells.filter(func(floss: FlossColor) -> bool: return floss != null)
 	_check(shown.size() == colors.size(), "picker shows every colour once")
+	var numbered := ThreadGrid.by_number(colors)
+	_check(numbered.slice(0, 3).map(func(floss: FlossColor) -> String: return floss.code) == ["B5200", "Blanc", "Ecru"],
+			"list starts with the named colours")
+	var ascending := true
+	for i in range(4, numbered.size()):
+		ascending = ascending and numbered[i - 1].code.to_int() <= numbered[i].code.to_int()
+	_check(ascending and numbered.size() == colors.size(), "list goes up by number")
 	var sorted_rows := true
 	for start in range(0, cells.size(), COLUMNS):
 		var row := cells.slice(start, start + COLUMNS).filter(func(floss: FlossColor) -> bool: return floss != null)

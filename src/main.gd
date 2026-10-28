@@ -10,7 +10,9 @@ extends Control
 ## `--method=<english|danish>` sets the stitch method, `--back-pass=<whole|blocks>` the Danish
 ## return pass, `--max-block=<n>` the most stitches per block, `--needle=<auto|bottom|top>` and
 ## `--first-leg=<slash|backslash>` the stitch style (bottom/top/first-leg fix it), `--projects` the project list, `--stitch=<code>` starts stitching that thread, `--steps=<n>` confirms n steps, `--back` shows the back while stitching, `--screenshot=<png path>` saves a screenshot after a few
-## frames and quits. `--ui=<touch|desktop>` sets the layout, `--overlays=<menu,pin,list,text>`
+## frames and quits (`--wait=<seconds>` waits that much longer, e.g. into an animation).
+## `--finish` stitches the rest of the `--stitch` colour (the celebration comes in),
+## `--dismiss` then taps it away to the overview. `--ui=<touch|desktop>` sets the layout, `--overlays=<menu,pin,list,text>`
 ## opens touch overlays (pin: the menu pinned), `--tooltip=<menu|list|text>` shows a round
 ## button's tooltip, `--safe-area=<left>,<top>,<right>,<bottom>` pretends the screen has a notch
 ## or island (canvas pixels), `--picker=<code>` opens the colour picker for that colour of the
@@ -30,6 +32,8 @@ const BUTTON_HEIGHT := 48.0
 const NEEDLE_ICON_PX := 96
 ## Rows of left-out colours are faded to this.
 const LEFT_OUT_ALPHA := 0.35
+## Height of the progress bar between the bottom buttons (or under the desktop layout).
+const PROGRESS_HEIGHT := 16.0
 ## Smallest cell size when stitching starts, so the current block is easy to see.
 const STITCH_CELL_PX := 24.0
 ## Starting light for the test sliders: from the top left, 40° above the fabric.
@@ -155,6 +159,16 @@ var _picker_tween: Tween
 var _color_list: VBoxContainer
 var _stitch_panel: StitchPanel
 var _file_dialog: FileDialog
+## Progress of the colour being stitched, or of the whole project in the overview.
+var _progress: ProgressStrip
+var _celebration: Celebration
+## When stitching began: the whole project's progress and whether the colour was finished, for
+## the overview's show on the way back.
+var _overall_before := 0.0
+var _thread_done_before := false
+## The colour just finished, struck through in the list once the overview's bar has filled.
+var _strike_code := ""
+var _strikes := {}  # code -> StrikeLine
 
 
 func _ready() -> void:
@@ -243,6 +257,9 @@ func _build_ui() -> void:
 	_picker.confirmed.connect(_close_picker)
 	_picker.cancelled.connect(_close_picker.bind("", ""))
 	_list_host.add_child(_picker)
+
+	_progress = ProgressStrip.new()
+	_progress.visible = false
 
 	_stitch_panel = StitchPanel.new()
 	_stitch_panel.visible = false
@@ -453,6 +470,8 @@ func _apply_ui_mode() -> void:
 		_place(_stitch_panel.info, _text_content, 1)
 		_place(_list_host, _list_content, 0)
 		_place(_stitch_panel.controls, _list_content, 1)
+		_place(_progress, _touch_root, 1)
+		_progress.custom_minimum_size = Vector2.ZERO
 		if _project == null:
 			_set_overlay(_menu_panel, _menu_button, true)
 	else:
@@ -463,6 +482,8 @@ func _apply_ui_mode() -> void:
 		_place(_list_host, _body, 1)
 		_place(_stitch_panel.info, _stitch_panel, 0)
 		_place(_stitch_panel.controls, _stitch_panel, 1)
+		_place(_progress, _desktop_column)
+		_progress.custom_minimum_size.y = PROGRESS_HEIGHT + _progress.margin * 2.0
 	_update_visibility()
 	_update_layout()
 
@@ -699,6 +720,9 @@ func _layout_touch() -> void:
 	_text_button.position = Vector2(right - ROUND_BUTTON_PX, bottom_row)
 	for button: Control in [_menu_button, _list_button, _text_button]:
 		button.size = button.custom_minimum_size
+	var bar_left := left + ROUND_BUTTON_PX + TOUCH_MARGIN
+	_progress.place_bar(Rect2(bar_left, bottom_row + (ROUND_BUTTON_PX - PROGRESS_HEIGHT) / 2.0,
+			maxf(right - ROUND_BUTTON_PX - TOUCH_MARGIN - bar_left, 0.0), PROGRESS_HEIGHT))
 
 	_menu_panel.offset_left = left + ROUND_BUTTON_PX + TOUCH_MARGIN * 0.5
 	_menu_panel.offset_right = -_safe.z - TOUCH_MARGIN
@@ -870,6 +894,7 @@ func _apply_settings() -> void:
 		_refresh_stitching()
 	else:
 		_fill_color_list()
+	_update_progress()
 
 
 ## Replans the open project for the current preferences; stitched cells stay stitched.
@@ -913,6 +938,7 @@ func _show_pattern(keep_view: bool) -> void:
 	_view.show_pattern(_project.pattern, _palette, keep_view)
 	_show_info()
 	_fill_color_list()
+	_update_progress()
 
 
 ## Saves the project; called after every change, so nothing is lost when the app closes.
@@ -956,6 +982,7 @@ func _on_project_deleted(path: String) -> void:
 	_project = null
 	_full_pattern = null
 	_view.clear()
+	_update_progress()
 	for child in _color_list.get_children():
 		child.queue_free()
 	_show_message("Projekt gelöscht. Öffne ein Bild oder ein anderes Projekt.")
@@ -965,6 +992,7 @@ func _on_project_deleted(path: String) -> void:
 func _fill_color_list() -> void:
 	for child in _color_list.get_children():
 		child.queue_free()
+	_strikes.clear()
 	var counts := _full_pattern.stitch_counts()
 	var order := range(counts.size())
 	order.sort_custom(func(a: int, b: int) -> bool: return counts[a] > counts[b])
@@ -994,6 +1022,10 @@ func _make_color_row(floss: FlossColor, count: int) -> Control:
 	name_label.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	row.add_child(name_label)
 	swatch.pressed.connect(_open_picker.bind(floss, swatch, name_label))
+	if thread >= 0 and session.current_step(thread) == null:
+		var strike := StrikeLine.new(name_label, floss.code != _strike_code)
+		code_label.add_child(strike)
+		_strikes[floss.code] = strike
 	var count_label := Label.new()
 	count_label.text = str(count)
 	if thread >= 0 and session.done_count(thread) > 0:
@@ -1142,6 +1174,9 @@ func _on_fabric_toggled(pressed: bool, code: String) -> void:
 
 func _enter_stitching(thread: int) -> void:
 	_close_picker_now()
+	_overall_before = _project.session.leg_progress()
+	_thread_done_before = _project.session.current_step(thread) == null
+	_strike_code = ""
 	_stitch_thread = thread
 	_update_visibility()
 	var step := _project.session.current_step(thread)
@@ -1149,11 +1184,20 @@ func _enter_stitching(thread: int) -> void:
 		_view.focus_step(step, STITCH_CELL_PX)
 	# After zooming, so the reference stitch is panned into view as well.
 	_refresh_stitching()
+	_update_progress()
 
 
+## Back to the overview. Its bar starts where the project was when stitching began and fills up
+## to now; a colour finished meanwhile is struck through in the list after that.
 func _leave_stitching() -> void:
 	if _stitch_thread < 0:
 		return
+	var thread := _stitch_thread
+	var finished := _project.session.current_step(thread) == null and not _thread_done_before
+	_strike_code = _project.pattern.thread_codes[thread] if finished else ""
+	if _celebration != null:
+		_celebration.queue_free()
+		_celebration = null
 	_stitch_thread = -1
 	_shown_step = null
 	_update_visibility()
@@ -1162,6 +1206,60 @@ func _leave_stitching() -> void:
 	_show_info()
 	_fill_color_list()
 	_open_overview_panels()
+	_progress.set_color(ProgressStrip.DEFAULT_COLOR)
+	_progress.set_value(_overall_before)
+	_show_overall_progress.call_deferred()
+
+
+## Fills the overview's bar up to the project's progress, then strikes through the colour just
+## finished.
+func _show_overall_progress() -> void:
+	if _project == null or _stitch_thread >= 0:
+		return
+	_update_progress(true)
+	if _strike_code.is_empty():
+		return
+	if _progress.is_filling():
+		await _progress.fill_finished
+	var strike: StrikeLine = _strikes.get(_strike_code)
+	_strike_code = ""
+	if strike != null and is_instance_valid(strike) and _stitch_thread < 0:
+		strike.strike()
+
+
+## The bar shows the colour being stitched (in the colour of its block) or the whole project (in
+## blue); the round buttons light up in the same colour when switched on. `animate` plays the
+## bar's fill show.
+func _update_progress(animate := false) -> void:
+	_progress.visible = _project != null
+	if _project == null:
+		return
+	var color := ProgressStrip.DEFAULT_COLOR
+	var value := _project.session.leg_progress()
+	if _stitch_thread >= 0:
+		color = PatternView.block_color(_palette.find_code(_project.pattern.thread_codes[_stitch_thread]).color)
+		value = _project.session.leg_progress(_stitch_thread)
+	_progress.set_color(color, animate)
+	_progress.set_value(value, animate)
+	for button: RoundButton in [_menu_button, _list_button, _text_button, _menu_pin]:
+		button.tint_color = color
+
+
+## The colour is finished: once the bar is full, the celebration takes over the screen; a tap on
+## it goes back to the overview.
+func _celebrate() -> void:
+	var thread := _stitch_thread
+	if _progress.is_filling():
+		await _progress.fill_finished
+	if _stitch_thread != thread or _celebration != null or _project.session.current_step(thread) != null:
+		return
+	_celebration = Celebration.new()
+	add_child(_celebration)
+	_celebration.dismissed.connect(func() -> void:
+		_celebration = null
+		_leave_stitching())
+	_celebration.play(_palette.find_code(_project.pattern.thread_codes[thread]),
+			_project.pattern.stitch_counts()[thread], _progress.color, _progress.bar_rect())
 
 
 func _refresh_stitching() -> void:
@@ -1243,6 +1341,9 @@ func _next_step() -> void:
 		_project.session.advance(_stitch_thread)
 		_refresh_stitching()
 		_save()
+		_update_progress(true)
+		if _project.session.current_step(_stitch_thread) == null:
+			_celebrate()
 
 
 func _previous_step() -> void:
@@ -1250,6 +1351,7 @@ func _previous_step() -> void:
 		_project.session.go_back(_stitch_thread)
 		_refresh_stitching()
 		_save()
+		_update_progress(true)
 
 
 func _toggle_new_thread() -> void:
@@ -1275,6 +1377,9 @@ func _handle_cmdline() -> void:
 	var picker_code := ""
 	var pick_code := ""
 	var picker_view := PackedStringArray()
+	var finish := false
+	var dismiss := false
+	var wait := 0.0
 	for arg in OS.get_cmdline_user_args():
 		if arg.begins_with("--open="):
 			_open_image(arg.trim_prefix("--open="))
@@ -1308,6 +1413,12 @@ func _handle_cmdline() -> void:
 			_apply_style()
 		elif arg == "--back":
 			back = true
+		elif arg == "--finish":
+			finish = true
+		elif arg == "--dismiss":
+			dismiss = true
+		elif arg.begins_with("--wait="):
+			wait = arg.trim_prefix("--wait=").to_float()
 		elif arg.begins_with("--zoom="):
 			zoom = arg.trim_prefix("--zoom=").to_float()
 		elif arg.begins_with("--flip="):
@@ -1355,7 +1466,17 @@ func _handle_cmdline() -> void:
 		_enter_stitching(_project.pattern.thread_codes.find(stitch_code))
 		for i in steps:
 			_next_step()
-		var step := _project.session.current_step(_stitch_thread)
+		if finish:
+			while _stitch_thread >= 0 and _project.session.current_step(_stitch_thread) != null:
+				_next_step()
+			while _stitch_thread >= 0 and (_celebration == null or _celebration.is_arriving()):
+				await get_tree().process_frame
+			if dismiss and _celebration != null:
+				await get_tree().create_timer(Celebration.TAP_DELAY_SECONDS).timeout
+				_celebration.leave()
+				while _stitch_thread >= 0:
+					await get_tree().process_frame
+		var step := _project.session.current_step(_stitch_thread) if _stitch_thread >= 0 else null
 		if zoom > 0.0 and step != null:
 			_view.focus_step(step, zoom)
 		if back:
@@ -1393,6 +1514,11 @@ func _handle_cmdline() -> void:
 		await get_tree().process_frame
 	if _view.is_flipping() and flip < 0.0:
 		await _view.flip_finished
+	if wait > 0.0:
+		await get_tree().create_timer(wait).timeout
+	else:
+		while _progress.is_filling():
+			await get_tree().process_frame
 	for i in 3:
 		await get_tree().process_frame
 	# Low processor mode draws only when something changed, so ask for one more frame.

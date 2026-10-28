@@ -243,6 +243,21 @@ func finished_crosses(thread: int) -> int:
 	return count
 
 
+## Share of the legs stitched, 0..1: of `thread`, or of every thread with -1. A half stitch is
+## one leg of the two of a cross, so every step moves it on.
+func leg_progress(thread := -1) -> float:
+	var states := cell_states()
+	var done := 0
+	var total := 0
+	for i in states.size():
+		var cell_thread := pattern.cells[i]
+		if cell_thread == Pattern.EMPTY or (thread >= 0 and cell_thread != thread):
+			continue
+		total += 2
+		done += states[i]  # Cell.HALF is 1 leg, Cell.FULL 2.
+	return float(done) / total if total > 0 else 0.0
+
+
 ## Cell value per cell (row by row), from the finished steps of every thread.
 func cell_states() -> PackedByteArray:
 	var states := PackedByteArray()

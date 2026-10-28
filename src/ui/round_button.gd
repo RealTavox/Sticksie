@@ -15,6 +15,7 @@ const TOOLTIP_GAP := 8.0
 ## Switching on or off blends the colour over this time.
 const TINT_SECONDS := 0.15
 const SHADER := preload("res://src/ui/round_button.gdshader")
+const DEFAULT_TINT := Color(0.17, 0.47, 0.88)
 
 ## Shown while the button is held down.
 var tooltip := ""
@@ -33,6 +34,12 @@ var disabled := false:
 	set(value):
 		disabled = value
 		_update_material()
+## Colour of the face while switched on (the blue of the app by default).
+var tint_color := DEFAULT_TINT:
+	set(value):
+		tint_color = value
+		_material.set_shader_parameter("tint_color", value)
+		queue_redraw()
 var icon := ButtonIcons.Icon.MENU:
 	set(value):
 		icon = value

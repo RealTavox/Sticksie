@@ -40,8 +40,9 @@ item is resolved during normal work, delete its entry in the same change.
   views (`PatternView` draws `StitchScene` from a SubViewport and its 2D marks on top with the
   same grid-to-screen mapping; preview mode shows every cell as a finished cross, progress mode
   the stitched legs, the current block with an arrow along every leg (up hole to down hole) and
-  its stitch count in a badge, the counting path with small numbers plus each leg's total in a
-  badge like the block count, and the thread labels a cell away with a leader line, moved to the
+  its stitch count in a badge, the counting path in turquoise from hole to hole (from the
+  reference's corner matching the needle's first hole to that hole, so each hop is a cell) with
+  small numbers plus each leg's total in a badge like the block count, and the thread labels a cell away with a leader line, moved to the
   other side when a badge or the path is in the way; the block colour is orange or the button
   blue, whichever differs more from the thread (`contrast_color()`, CIEDE2000), the thread
   start/end marks switch to their second colour only when the first is closer than
@@ -52,7 +53,7 @@ item is resolved during normal work, delete its entry in the same change.
   from the left edge = overview; `set_covered()` keeps steps clear of overlays), `StitchPanel`
   step guidance (texts in `info`, buttons in `controls`, so the touch layout can split them),
   `RoundButton` the round see-through touch buttons (lit by `round_button.gdshader` from the
-  test light, symbols from `ButtonIcons` distance functions, tooltip on long press), `ProjectBrowser` the
+  test light, `tint_color` when on: the block colour while stitching, blue in the overview, symbols from `ButtonIcons` distance functions, tooltip on long press), `ProjectBrowser` the
   project list: open, rename, delete after a confirmation; the preview comes from
   `ProjectStore.preview()`, for now the source image, later meant to show the progress), `main.tscn`/`main.gd` the start screen: two layouts
   built from the same widgets, moved by `_apply_ui_mode()`: desktop (toolbar, side panel) and
@@ -61,12 +62,22 @@ item is resolved during normal work, delete its entry in the same change.
   texts bottom right; all inside the display's safe area; `_set_overlay()` slides and fades
   them in and out (panels stacked in the dock move along as one), then the view glides the
   current step clear of them; the overview opens the
-  colour list and info by itself), `SkeinSwatch` a thread colour drawn as a square of the pure
+  colour list and info by itself), `ProgressStrip` the progress bar
+  between the bottom round buttons (desktop: under everything): grey capsule track, capsule fill
+  in the block colour (blue in the overview), progress counted in legs
+  (`StitchSession.leg_progress()`, a half stitch is one of two); going up it flashes the new
+  part white, pops and fills after it with bands of light (`progress_strip.gdshader`),
+  `Celebration` the full-screen show when a colour is finished (dimmed screen, the bar flies to
+  the middle and glows, CPUParticles2D confetti and sparkles, congratulation; a tap goes to the
+  overview, whose bar then fills from where the project was when stitching began, and the colour
+  is struck through in the list by `StrikeLine`; finished colours stay struck through),
+  `SkeinSwatch` a thread colour drawn as a square of the pure
   colour with a loop of thread coming out of it (one colourless template image per shape,
   tinted by `skein.gdshader`, so it fades as one; tapping it opens the colour picker),
   `ThreadPicker`/`ThreadGrid` the colour picker that swipes in over the colour list: every DMC
   colour as skeins on stairs (loop up, square lengthened by the loop), greys first then by hue,
-  rows light to dark; or as a list with number and name, and/or only the project's colours
+  rows light to dark; or as a list with number and name sorted by number (`by_number()`: B5200,
+  Blanc, Ecru, then numeric), and/or only the project's colours
   moved together, every skein gliding to its new place or fading out; choosing one shrinks the others away, then "Ersetzen" calls
   `StitchProject.replace_color()` (colour list rows; "Auslassen" fades the whole row),
   `tests/run_tests.gd`, plus `project.godot` and the `*.import` files next to resources (they
@@ -105,7 +116,7 @@ How to check a change; every fix and feature runs these. Godot binary:
    (both fix the style), `--advanced` with `--settings` for the advanced part, `--ui=<touch|desktop>` the layout,
    `--overlays=<menu,pin,list,text>` opens touch overlays, `--picker=<code>` the colour picker
    for a colour of the list, `--picker-view=<list,project>` its list view and/or project filter, `--pick=<code>` chooses a colour in it, `--tooltip=<menu|list|text>` shows a
-   round button's tooltip, `--safe-area=<l>,<t>,<r>,<b>` fakes a notch or island (canvas px), `--zoom=<cell px>`
+   round button's tooltip, `--safe-area=<l>,<t>,<r>,<b>` fakes a notch or island (canvas px), `--finish` stitches the rest of the `--stitch` colour (the celebration comes in), `--dismiss` taps it away to the overview, `--wait=<seconds>` waits that long before the screenshot (e.g. into the bar's fill; otherwise screenshots wait for the fill), `--zoom=<cell px>`
    to zoom in on the current step, `--light=<azimuth>,<elevation>` (degrees; azimuth clockwise
    from the top) for the test light, `--flip=<0..1>` with `--back` to hold the flip animation
    at that point. Screenshots wait for a running flip to end. In zsh, pass each user

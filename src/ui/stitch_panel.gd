@@ -24,7 +24,6 @@ var _swatch: ColorRect
 var _thread_label: Label
 var _step_label: Label
 var _detail_label: Label
-var _progress_bar: ProgressBar
 var _progress_label: Label
 var _previous_button: Button
 var _next_button: Button
@@ -55,9 +54,6 @@ func _init() -> void:
 	_detail_label.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	info.add_child(_detail_label)
 
-	_progress_bar = ProgressBar.new()
-	_progress_bar.show_percentage = false
-	info.add_child(_progress_bar)
 	_progress_label = Label.new()
 	_progress_label.modulate.a = 0.7
 	info.add_child(_progress_label)
@@ -108,8 +104,6 @@ func show_step(floss: FlossColor, step: StitchStep, position_text: String, step_
 	else:
 		_step_label.text = describe_step(step, style)
 		_detail_label.text = position_text
-	_progress_bar.max_value = maxi(step_count, 1)
-	_progress_bar.value = step_index
 	_progress_label.text = "Schritt %d von %d · %d von %d Kreuzen fertig" % [
 			mini(step_index + 1, step_count), step_count, crosses_done, cross_count]
 	_previous_button.disabled = step_index == 0

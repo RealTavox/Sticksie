@@ -28,9 +28,10 @@ const FABRIC_COLOR := StitchScene.FABRIC_COLOR
 ## The current step: orange, or the blue of the round buttons where that stands out more from
 ## the thread (see contrast_color()).
 const HIGHLIGHT_COLOR := Color(1.0, 0.5, 0.05)
-const HIGHLIGHT_ALT_COLOR := Color(0.17, 0.47, 0.88)
-## Reference stitch of the position hint, and the left/right leg of its counting path.
-const HINT_COLOR := Color(0.1, 0.45, 0.95)
+const HIGHLIGHT_ALT_COLOR := RoundButton.DEFAULT_TINT
+## Reference stitch of the position hint, and the left/right leg of its counting path:
+## turquoise, apart from both colours of the block.
+const HINT_COLOR := Color(0.0, 0.62, 0.64)
 ## The up/down leg of the counting path.
 const HINT_VERTICAL_COLOR := Color(0.7, 0.1, 0.65)
 ## Below this cell size the counting path shows dots instead of numbers.
@@ -189,7 +190,7 @@ func show_progress(states: PackedByteArray, highlight: StitchStep, hint: Positio
 	_thread_start_color = THREAD_START_COLOR
 	if highlight != null:
 		var thread := _colors[highlight.thread]
-		_highlight_color = contrast_color(thread, HIGHLIGHT_COLOR, HIGHLIGHT_ALT_COLOR)
+		_highlight_color = block_color(thread)
 		_thread_start_color = contrast_color(thread, THREAD_START_COLOR, THREAD_START_ALT_COLOR,
 				MARK_MIN_DELTA_E)
 	_thread_end_color = THREAD_END_COLOR
@@ -199,6 +200,12 @@ func show_progress(states: PackedByteArray, highlight: StitchStep, hint: Positio
 	_scene.set_states(states)
 	_scene.set_ghost(highlight)
 	queue_redraw()
+
+
+## The colour of the current block (and of everything matching it) for a thread of `thread`
+## colour: orange or the button blue, whichever stands out more.
+static func block_color(thread: Color) -> Color:
+	return contrast_color(thread, HIGHLIGHT_COLOR, HIGHLIGHT_ALT_COLOR)
 
 
 ## `main`, or `alternative` if that differs more from `thread` (CIEDE2000). With `enough`,
@@ -542,8 +549,10 @@ func _draw_badge(center: Vector2, text: String, color: Color) -> void:
 
 
 ## A ring around the reference stitch, a line along the counting path ending in an arrow, and
-## the count in every cell of the path. Each leg has its own colour (left/right, up/down) and
-## counts from 1 again: "1, 2 down, then 1, 2, 3 right".
+## the count at every hole of the path. Counting goes from hole to hole: the path starts at the
+## reference stitch's corner that matches the hole where the needle comes up in the step, and
+## ends at that hole, so each hop is one cell. Each leg has its own colour (left/right, up/down)
+## and counts from 1 again: "1, 2 down, then 1, 2, 3 right".
 func _draw_hint(hint: PositionHint) -> void:
 	var reference := _cell_rect(hint.reference.x, hint.reference.y)
 	var line_width := maxf(2.0, _cell_px * 0.08)
@@ -551,28 +560,30 @@ func _draw_hint(hint: PositionHint) -> void:
 	_taken.append(reference)
 	if hint.path.is_empty():
 		return
+	var number_radius := _cell_px * 0.24
 	for cell in hint.path:
-		_taken.append(_cell_rect(cell.x, cell.y))
+		_taken.append(Rect2(_count_point(cell) - Vector2.ONE * number_radius, Vector2.ONE * number_radius * 2.0))
 	var corners: Array[Vector2i] = [hint.reference]
 	var corner := hint.corner()
 	if corner != hint.reference and corner != hint.target:
 		corners.append(corner)
 	corners.append(hint.target)
+	var start := _count_point(hint.reference)
+	draw_circle(start, maxf(2.0, _cell_px * 0.1), HINT_COLOR)
 	for i in range(1, corners.size()):
-		var from := _cell_rect(corners[i - 1].x, corners[i - 1].y).get_center()
-		var to := _cell_rect(corners[i].x, corners[i].y).get_center()
-		draw_line(from, to, Color(_leg_color(corners[i] - corners[i - 1]), 0.6), line_width)
+		draw_line(_count_point(corners[i - 1]), _count_point(corners[i]),
+				Color(_leg_color(corners[i] - corners[i - 1]), 0.6), line_width)
 	var last_leg := corners[-1] - corners[-2]
-	var target := _cell_rect(hint.target.x, hint.target.y).get_center()
-	var direction := Vector2(last_leg).normalized()
-	var tip := target - direction * _cell_px * 0.1
-	var side := direction.orthogonal() * _cell_px * 0.2
-	var back := tip - direction * _cell_px * 0.3
+	var target := _count_point(hint.target)
+	var direction := (target - _count_point(corners[-2])).normalized()
+	var tip := target - direction * _cell_px * 0.12
+	var side := direction.orthogonal() * _cell_px * 0.18
+	var back := tip - direction * _cell_px * 0.28
 	draw_colored_polygon(PackedVector2Array([tip, back + side, back - side]), _leg_color(last_leg))
 	if hint.path.size() < 2:
 		return  # Directly adjacent: nothing to count.
 	var font := get_theme_default_font()
-	var font_size := int(_cell_px * 0.42)
+	var font_size := int(_cell_px * 0.36)
 	var count := 0
 	var previous := hint.reference
 	var previous_step := Vector2i.ZERO
@@ -581,20 +592,32 @@ func _draw_hint(hint: PositionHint) -> void:
 		count = count + 1 if step == previous_step else 1
 		previous = cell
 		previous_step = step
+		if cell == hint.target:
+			continue  # The arrow points at the needle's hole; its count is in the badge.
 		var color := _leg_color(step)
-		var center := _cell_rect(cell.x, cell.y).get_center()
+		var center := _count_point(cell)
 		if _cell_px < MIN_NUMBER_CELL_PX:
-			draw_circle(center, maxf(1.5, _cell_px * 0.12), color)
+			draw_circle(center, maxf(1.5, _cell_px * 0.1), color)
 			continue
 		var text := str(count)
 		var text_size := font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size)
 		var baseline := center + Vector2(-text_size.x / 2.0, -text_size.y / 2.0 + font.get_ascent(font_size))
-		draw_circle(center, _cell_px * 0.3, Color(FABRIC_COLOR, 0.85))
+		draw_circle(center, number_radius, Color(FABRIC_COLOR, 0.9))
+		draw_arc(center, number_radius, 0.0, TAU, 24, Color(color, 0.7), 1.0)
 		draw_string(font, baseline, text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, color)
 	_draw_leg_totals(corners)
 
 
-## The count of each counting leg once more, big as the block count, beside the cell where the
+## The hole of `cell` that counting uses: the same corner as the hole where the needle comes up
+## first in the current step.
+func _count_point(cell: Vector2i) -> Vector2:
+	var corner := Vector2.ZERO
+	if _highlight != null:
+		corner = style.needle_holes(_highlight)[0] - Vector2(_highlight.cells[0], _highlight.row)
+	return _hole_point(Vector2(cell) + corner)
+
+
+## The count of each counting leg once more, big as the block count, beside the hole where the
 ## leg ends, clear of the step's row: a first leg up or down goes on past its end, a first leg
 ## left or right gets it on the side away from the next leg; the last leg (ending at the step)
 ## left or right has it on the side away from where counting began, up or down away from the
@@ -602,18 +625,18 @@ func _draw_hint(hint: PositionHint) -> void:
 func _draw_leg_totals(corners: Array[Vector2i]) -> void:
 	for i in range(1, corners.size()):
 		var leg := corners[i] - corners[i - 1]
-		var start := _cell_rect(corners[i - 1].x, corners[i - 1].y).get_center()
-		var end := _cell_rect(corners[i].x, corners[i].y).get_center()
+		var start := _count_point(corners[i - 1])
+		var end := _count_point(corners[i])
 		var side := Vector2.UP
 		if i + 1 < corners.size():
-			var next := _cell_rect(corners[i + 1].x, corners[i + 1].y).get_center()
+			var next := _count_point(corners[i + 1])
 			side = (end - start if leg.x == 0 else end - next).normalized()
 		elif leg.x == 0:
 			side = Vector2.RIGHT if _highlight != null and _block_count_left(_highlight) else Vector2.LEFT
 		elif corners[0].y < corners[i].y:
 			side = Vector2.DOWN
 		var text := str(maxi(absi(leg.x), absi(leg.y)))
-		_draw_badge(end + side * (_cell_px * 0.5 + _badge_gap() + _badge_radius(text)), text,
+		_draw_badge(end + side * (_cell_px * 0.6 + _badge_gap() + _badge_radius(text)), text,
 				_leg_color(leg))
 
 
@@ -644,8 +667,9 @@ func _draw_thread_start(step: StitchStep) -> void:
 
 ## A short label for the mark at `center` (a ring of `radius`): above it (`vertical` -1) or below
 ## (1), a good cell away so it leaves the stitches around the mark free, joined to the ring by a
-## thin line; on a light background so it reads over stitches. It takes the other side when a
-## badge or label is in the way there. Left out when cells are too small.
+## thin line; on a light background so it reads over stitches. It takes the other side, or goes
+## further out, when a badge, label or counting number is in the way. Left out when cells are
+## too small.
 func _draw_label(center: Vector2, radius: float, vertical: float, text: String, color: Color) -> void:
 	if _cell_px < MIN_LABEL_CELL_PX:
 		return
@@ -655,15 +679,24 @@ func _draw_label(center: Vector2, radius: float, vertical: float, text: String, 
 	var gap := maxf(18.0, _cell_px * 1.1)
 	var box_height := font.get_height(font_size) + 2.0
 	var box := Rect2()
-	for side in [vertical, -vertical, vertical]:
-		vertical = side
-		var box_top := center.y + radius + gap if vertical > 0.0 else center.y - radius - gap - box_height
+	var preferred := vertical
+	# Tried in turn: the preferred side, the other one, then both twice as far; else the first.
+	var attempts: Array[Vector2] = [Vector2(preferred, 1.0), Vector2(-preferred, 1.0),
+			Vector2(preferred, 2.0), Vector2(-preferred, 2.0), Vector2(preferred, 1.0)]
+	for attempt in attempts:
+		vertical = attempt.x
+		var away := radius + gap * attempt.y
+		var box_top := center.y + away if vertical > 0.0 else center.y - away - box_height
 		box = Rect2(center.x - text_size.x / 2.0 - 3.0, box_top, text_size.x + 6.0, box_height)
 		if not _taken.any(func(taken: Rect2) -> bool: return taken.intersects(box)):
 			break
+	var line_start := center + Vector2(0.0, radius * vertical)
+	var line_end := Vector2(center.x, box.position.y if vertical > 0.0 else box.end.y)
+	# No line through a badge or number on the way; the label then stands on its own.
+	var line_rect := Rect2(line_start, Vector2.ZERO).expand(line_end).grow(1.0)
+	if not _taken.any(func(taken: Rect2) -> bool: return taken.intersects(line_rect)):
+		draw_line(line_start, line_end, color, maxf(1.5, _cell_px * 0.05))
 	_taken.append(box)
-	var line_end := box.position.y if vertical > 0.0 else box.end.y
-	draw_line(center + Vector2(0.0, radius * vertical), Vector2(center.x, line_end), color, maxf(1.5, _cell_px * 0.05))
 	draw_rect(box, Color(FABRIC_COLOR, 0.9))
 	draw_rect(box, color, false, 1.5)
 	draw_string(font, Vector2(box.position.x + 3.0, box.position.y + 1.0 + font.get_ascent(font_size)),
