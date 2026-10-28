@@ -79,6 +79,17 @@ static func set_stitch_style(fixed: bool, p_slash_first: bool, from_top: bool) -
 	_store("needle_from_top", from_top)
 
 
+## Whether the screen is laid out for touch (a full-screen view with round buttons that open
+## overlays) instead of the desktop layout with toolbar and side panel. Defaults to touch on
+## phones and tablets.
+static func touch_mode() -> bool:
+	return bool(_load().get_value("ui", "touch", OS.has_feature("mobile")))
+
+
+static func set_touch_mode(value: bool) -> void:
+	_store("touch", value, "ui")
+
+
 static func path() -> String:
 	return ProjectStore.directory.path_join("settings.cfg")
 
@@ -89,8 +100,8 @@ static func _load() -> ConfigFile:
 	return config
 
 
-static func _store(key: String, value: Variant) -> void:
+static func _store(key: String, value: Variant, section := "stitching") -> void:
 	var config := _load()
-	config.set_value("stitching", key, value)
+	config.set_value(section, key, value)
 	DirAccess.make_dir_recursive_absolute(ProjectStore.directory)
 	config.save(path())

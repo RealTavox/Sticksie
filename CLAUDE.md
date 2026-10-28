@@ -21,7 +21,8 @@ item is resolved during normal work, delete its entry in the same change.
 - Project code: `src/` (`project/` saving: `StitchProject` and its JSON format, `ProjectStore`
   files in `user://projects/` (list with preview picture, rename, delete) and the last opened project, `Preferences` app-wide settings in
   `settings.cfg` next to the projects (skip limit, start corner, stitch method, block size, the advanced
-  stitch style; not saved in the project file, pushed into the open project); `palette/` thread colours and Lab matching, `pattern/` the `Pattern`
+  stitch style; not saved in the project file, pushed into the open project; plus the touch or
+  desktop layout in section `ui`, default touch on mobile); `palette/` thread colours and Lab matching, `pattern/` the `Pattern`
   resource, `import/` PNG → pattern, `planner/` Danish stitch order (`StitchPlanner` →
   `StitchStep`s), `stitching/` progress per thread (`StitchSession`), the back of the fabric
   (`BackSide`: the thread between the needle holes, worked out from the planned steps; drawn
@@ -38,9 +39,23 @@ item is resolved during normal work, delete its entry in the same change.
   views (`PatternView` draws `StitchScene` from a SubViewport and its 2D marks on top with the
   same grid-to-screen mapping; preview mode shows every cell as a finished cross, progress mode
   the stitched legs and the current block's stitch count; `set_back_side(…, true)` animates the
-  flip), `StitchPanel` step guidance, `ProjectBrowser` the
+  flip; gestures for touch and mouse: one or two fingers / right mouse drag pan, pinch / wheel
+  zoom, tap = next (held back `DOUBLE_TAP_SECONDS` to rule out a double tap), double tap = back,
+  two-finger double tap / double right click = new thread, swipe in from the right edge = flip,
+  from the left edge = overview; `set_covered()` keeps steps clear of overlays), `StitchPanel`
+  step guidance (texts in `info`, buttons in `controls`, so the touch layout can split them),
+  `RoundButton` the round see-through touch buttons (lit by `round_button.gdshader` from the
+  test light, symbols from `ButtonIcons` distance functions, tooltip on long press), `ProjectBrowser` the
   project list: open, rename, delete after a confirmation; the preview comes from
-  `ProjectStore.preview()`, for now the source image, later meant to show the progress), `main.tscn`/`main.gd` the start screen),
+  `ProjectStore.preview()`, for now the source image, later meant to show the progress), `main.tscn`/`main.gd` the start screen: two layouts
+  built from the same widgets, moved by `_apply_ui_mode()`: desktop (toolbar, side panel) and
+  touch (view on the whole screen, round buttons for the menu top left, which closes itself on
+  the next touch of the view unless pinned, the colour list / stitching buttons bottom left, the
+  texts bottom right; all inside the display's safe area; `_set_overlay()` slides and fades
+  them in and out (panels stacked in the dock move along as one), then the view glides the
+  current step clear of them; the overview opens the
+  colour list and info by itself), `SkeinSwatch` a thread colour drawn as a skein with a band in
+  the pure colour (colour list rows; "Auslassen" fades the whole row),
   `tests/run_tests.gd`, plus `project.godot` and the `*.import` files next to resources (they
   hold import settings: `data/threads/dmc-floss.csv` uses the "keep" importer so it isn't
   turned into a translation, `samples/*.png` use the "image" importer so `load()` returns an
@@ -64,7 +79,7 @@ How to check a change; every fix and feature runs these. Godot binary:
 2. `$G --headless --path . --script res://tests/run_tests.gd`: prints "All tests passed."
    and exits 0. Plain checks without a framework (Lab/CIEDE2000 against Sharma's reference
    pairs, DMC palette, importing the sample, stitch planner incl. that every cell of the sample
-   is crossed exactly once, stitching progress, position hints and their wording).
+   is crossed exactly once, stitching progress, position hints and their wording, view gestures fed as touch events).
 3. `$G --headless --path . --quit-after 120 -- --projects-dir=<scratch dir> --open=res://samples/hypsi_anhaenger.png --stitch=3837 --steps=7 2>&1 | grep -E "ERROR|WARNING"`:
    no output. Always pass `--projects-dir` with a scratch folder: every run that opens an image
    saves a project, and without it that lands in the user's real projects.
@@ -74,13 +89,17 @@ How to check a change; every fix and feature runs these. Godot binary:
    --steps=<n>` for the stitching screen after n confirmed steps, `--max-skip=<n>` to set the
    skip limit (-1: none), `--start=<top-left|top-right|bottom-left|bottom-right>` the start corner, `--settings` to open the settings dialog, `--projects` the project list, `--back` the back side while stitching,
    `--method=<danish|english>`, `--back-pass=<whole|blocks>`, `--max-block=<n>`, `--needle=<auto|bottom|top>`, `--first-leg=<slash|backslash>`
-   (both fix the style), `--advanced` with `--settings` for the advanced part, `--zoom=<cell px>`
+   (both fix the style), `--advanced` with `--settings` for the advanced part, `--ui=<touch|desktop>` the layout,
+   `--overlays=<menu,pin,list,text>` opens touch overlays, `--tooltip=<menu|list|text>` shows a
+   round button's tooltip, `--safe-area=<l>,<t>,<r>,<b>` fakes a notch or island (canvas px), `--zoom=<cell px>`
    to zoom in on the current step, `--light=<azimuth>,<elevation>` (degrees; azimuth clockwise
    from the top) for the test light, `--flip=<0..1>` with `--back` to hold the flip animation
    at that point. Screenshots wait for a running flip to end. In zsh, pass each user
    argument as its own word (an unsplit `"$args"` arrives as one argument and is ignored).
 
-Touch input (pan, pinch) and the native file dialog are not covered by these; check them on a
+Real touch input (pan, pinch, edge swipes against the system's own edge gestures), mouse
+gestures in a running window, long-press tooltips and the native file dialog are not covered
+by these; check them on a
 device or in the editor and say so in the report. Resuming: run once with `--open` and
 `--steps`, then again with only `--projects-dir` (the last project opens by itself).
 

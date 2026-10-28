@@ -5,10 +5,21 @@ extends Control
 ## same mapping from grid to screen. Preview mode shows every cell as a finished cross; progress
 ## mode only the stitched legs plus the current step and its stitch count; with `back_side` it
 ## shows the back instead, mirrored as when the fabric is turned over (set_back_side() can turn
-## it over with an animation). Drag to pan; pinch, trackpad or mouse wheel to zoom; a short tap
-## emits `tapped`.
+## it over with an animation).
+##
+## Gestures, each also doable with the mouse (left clicks arrive as touches through
+## emulate_touch_from_mouse): drag with one or two fingers or the right mouse button to pan;
+## pinch, trackpad or mouse wheel to zoom; tap or click for `tapped` (held back until a double
+## tap is ruled out), double tap for `double_tapped`, double tap with two fingers or double right
+## click for `two_finger_double_tapped`; a swipe in from the left or right edge for
+## `swiped_from_left` / `swiped_from_right`. `touched` comes at the start of every gesture.
 
 signal tapped
+signal double_tapped
+signal two_finger_double_tapped
+signal swiped_from_left
+signal swiped_from_right
+signal touched
 ## A flip animation has ended.
 signal flip_finished
 
@@ -32,7 +43,18 @@ const FIT_MARGIN := 16.0
 const WHEEL_ZOOM := 1.15
 ## A touch that moves less than this is a tap.
 const TAP_SLOP := 12.0
+## Longest touch that still counts as a tap, and longest wait for the second tap of a double tap.
+const TAP_SECONDS := 0.35
+const DOUBLE_TAP_SECONDS := 0.32
+## The second tap of a double tap lands at most this far from the first.
+const DOUBLE_TAP_SLOP := 48.0
+## A one-finger touch starting this close to the left or right edge and moving at least SWIPE_PX
+## inwards, mostly sideways, is an edge swipe.
+const EDGE_PX := 40.0
+const SWIPE_PX := 90.0
 const FLIP_SECONDS := 0.7
+## ensure_visible(…, true) glides there in this time.
+const PAN_SECONDS := 0.3
 
 var pattern: Pattern
 ## Show the back of the fabric (progress mode only): the thread between the holes, mirrored
@@ -65,6 +87,7 @@ var _turn := 0.0:
 var _turn_origin := Vector2.ZERO
 var _turn_pivot := 0.0
 var _flip_tween: Tween
+var _pan_tween: Tween
 var _colors: Array[Color] = []
 ## StitchSession.Cell per cell in progress mode; empty in preview mode.
 var _states := PackedByteArray()
@@ -79,11 +102,24 @@ var _cell_px := 10.0
 ## Top left corner of the grid, in local coordinates.
 var _origin := Vector2.ZERO
 var _touches := {}  # touch index -> position
+var _touch_starts := {}  # touch index -> where it went down
+## The gesture running since the first finger went down: most fingers at once, whether any
+## moved past TAP_SLOP, when it began, and the edge it began at (-1 left, 1 right, 0 none).
+var _gesture_fingers := 0
+var _gesture_moved := false
+var _gesture_start_msec := 0
+var _gesture_edge := 0
+## A tap waiting to see whether a second one follows; the count stops older timers.
+var _tap_pending := false
+var _tap_count := 0
+var _tap_position := Vector2.ZERO
+var _two_finger_tap_msec := -100000
+## Parts of the view covered by overlays (top and bottom, in pixels): steps are kept clear of them.
+var _cover_top := 0.0
+var _cover_bottom := 0.0
 ## Where threads start and end on the back, holes in grid units (BackSide).
 var _back_starts := PackedVector2Array()
 var _back_ends := PackedVector2Array()
-var _tap_possible := false
-var _tap_start := Vector2.ZERO
 ## Size at the last layout, to keep the centre when the view is resized.
 var _laid_out_size := Vector2.ZERO
 ## focus_step() called before the first layout: [step, min_cell_px], applied on layout.
@@ -170,6 +206,7 @@ func set_back_side(value: bool, animate: bool) -> void:
 	if value == _back_side:
 		return
 	_stop_flip()
+	_stop_pan()
 	if pattern != null:
 		var middle := size.x / 2.0
 		if animate and _is_laid_out():
@@ -219,10 +256,12 @@ func _stop_flip() -> void:
 func fit_to_view() -> void:
 	if pattern == null or pattern.width == 0 or size.x <= 0.0 or size.y <= 0.0:
 		return
-	var available := size - Vector2.ONE * FIT_MARGIN * 2.0
+	_stop_pan()
+	var free := _free_rect()
+	var available := free.size - Vector2.ONE * FIT_MARGIN * 2.0
 	_cell_px = clampf(minf(available.x / pattern.width, available.y / pattern.height),
 			MIN_CELL_PX, MAX_CELL_PX)
-	_origin = (size - Vector2(pattern.width, pattern.height) * _cell_px) / 2.0
+	_origin = free.get_center() - Vector2(pattern.width, pattern.height) * _cell_px / 2.0
 	queue_redraw()
 
 
@@ -231,27 +270,63 @@ func focus_step(step: StitchStep, min_cell_px: float) -> void:
 	if not _is_laid_out():
 		_pending_focus = [step, min_cell_px]
 		return
+	_stop_pan()
 	_cell_px = clampf(maxf(_cell_px, min_cell_px), MIN_CELL_PX, MAX_CELL_PX)
 	var rect := _step_rect(step)
-	_origin += size / 2.0 - rect.get_center()
+	_origin += _free_rect().get_center() - rect.get_center()
 	queue_redraw()
 
 
 ## Pans so the cells of `step` (and the reference stitch of `hint`, and `extra` if given) are on
 ## screen, if they aren't already.
-func ensure_visible(step: StitchStep, hint: PositionHint = null, extra := Vector2i(-1, -1)) -> void:
+## With `animate` the view glides there instead of jumping.
+func ensure_visible(step: StitchStep, hint: PositionHint = null, extra := Vector2i(-1, -1),
+		animate := false) -> void:
 	if not _is_laid_out():
 		return
+	_stop_pan()
 	var rect := _step_rect(step)
 	if hint != null:
 		rect = rect.merge(_cell_rect(hint.reference.x, hint.reference.y))
 	if extra.x >= 0:
 		rect = rect.merge(_cell_rect(extra.x, extra.y))
-	var view := Rect2(Vector2.ZERO, size).grow(-FIT_MARGIN)
+	var view := _free_rect().grow(-FIT_MARGIN)
 	if view.encloses(rect):
 		return
-	_origin += view.get_center() - rect.get_center()
+	var target := _origin + view.get_center() - rect.get_center()
+	if not animate or not is_inside_tree():
+		_set_origin(target)
+		return
+	_pan_tween = create_tween()
+	_pan_tween.tween_method(_set_origin, _origin, target, PAN_SECONDS).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+
+
+func is_panning() -> bool:
+	return _pan_tween != null and _pan_tween.is_running()
+
+
+func _set_origin(origin: Vector2) -> void:
+	_origin = origin
 	queue_redraw()
+
+
+## Stops a glide from ensure_visible(); anything else that moves the view comes first.
+func _stop_pan() -> void:
+	if _pan_tween != null:
+		_pan_tween.kill()
+		_pan_tween = null
+
+
+## Tells the view which parts overlays cover; the next ensure_visible() keeps steps clear of them.
+func set_covered(top: float, bottom: float) -> void:
+	_cover_top = top
+	_cover_bottom = bottom
+
+
+## The part of the view not covered by overlays, or all of it if too little is left.
+func _free_rect() -> Rect2:
+	var free := Rect2(0.0, _cover_top, size.x, size.y - _cover_top - _cover_bottom)
+	return free if free.size.y > FIT_MARGIN * 6.0 else Rect2(Vector2.ZERO, size)
 
 
 func _is_laid_out() -> bool:
@@ -484,61 +559,137 @@ func _step_rect(step: StitchStep) -> Rect2:
 
 
 func _gui_input(event: InputEvent) -> void:
-	if _flipping:
-		accept_event()
-		return
 	if event is InputEventScreenTouch:
-		if event.pressed:
-			_touches[event.index] = event.position
-			_tap_possible = _touches.size() == 1
-			_tap_start = event.position
-		else:
-			_touches.erase(event.index)
-			if (_tap_possible and _touches.is_empty() and not event.canceled
-					and event.position.distance_to(_tap_start) <= TAP_SLOP):
-				tapped.emit()
-			_tap_possible = false
-		accept_event()
+		_on_touch(event)
 	elif event is InputEventScreenDrag:
-		var before: Dictionary = _touches.duplicate()
-		_touches[event.index] = event.position
-		if event.position.distance_to(_tap_start) > TAP_SLOP:
-			_tap_possible = false
-		if _touches.size() == 1:
-			_pan(event.relative)
-		elif _touches.size() >= 2 and before.size() >= 2:
-			var keys := _touches.keys()
-			var old_a: Vector2 = before.get(keys[0], _touches[keys[0]])
-			var old_b: Vector2 = before.get(keys[1], _touches[keys[1]])
-			var new_a: Vector2 = _touches[keys[0]]
-			var new_b: Vector2 = _touches[keys[1]]
-			var old_distance := old_a.distance_to(old_b)
-			if old_distance > 0.0:
-				_zoom_at((new_a + new_b) / 2.0, new_a.distance_to(new_b) / old_distance)
-			_pan((new_a + new_b - old_a - old_b) / 2.0)
-		accept_event()
+		_on_drag(event)
+	elif _flipping:
+		pass
 	elif event is InputEventMagnifyGesture:
 		_zoom_at(event.position, event.factor)
-		accept_event()
 	elif event is InputEventPanGesture:
 		_pan(-event.delta * 8.0)
-		accept_event()
 	elif event is InputEventMouseButton and event.pressed:
-		if event.button_index == MOUSE_BUTTON_WHEEL_UP:
-			_zoom_at(event.position, WHEEL_ZOOM)
-			accept_event()
-		elif event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
-			_zoom_at(event.position, 1.0 / WHEEL_ZOOM)
-			accept_event()
+		# The left button arrives as touches.
+		match event.button_index:
+			MOUSE_BUTTON_WHEEL_UP:
+				touched.emit()
+				_zoom_at(event.position, WHEEL_ZOOM)
+			MOUSE_BUTTON_WHEEL_DOWN:
+				touched.emit()
+				_zoom_at(event.position, 1.0 / WHEEL_ZOOM)
+			MOUSE_BUTTON_RIGHT:
+				touched.emit()
+				if event.double_click:
+					two_finger_double_tapped.emit()
+			_:
+				return
+	elif event is InputEventMouseMotion and event.button_mask & MOUSE_BUTTON_MASK_RIGHT:
+		_pan(event.relative)
+	else:
+		return
+	accept_event()
+
+
+func _on_touch(event: InputEventScreenTouch) -> void:
+	if event.pressed:
+		if _touches.is_empty():
+			touched.emit()
+			_gesture_fingers = 0
+			_gesture_moved = _flipping
+			_gesture_start_msec = Time.get_ticks_msec()
+			_gesture_edge = 0
+			if event.position.x < EDGE_PX:
+				_gesture_edge = -1
+			elif event.position.x > size.x - EDGE_PX:
+				_gesture_edge = 1
+		_touches[event.index] = event.position
+		_touch_starts[event.index] = event.position
+		_gesture_fingers = maxi(_gesture_fingers, _touches.size())
+		return
+	if not _touches.has(event.index):
+		return
+	var start: Vector2 = _touch_starts[event.index]
+	_touches.erase(event.index)
+	_touch_starts.erase(event.index)
+	if event.canceled or event.position.distance_to(start) > TAP_SLOP:
+		_gesture_moved = true
+	if _touches.is_empty():
+		_end_gesture(start, event.position)
+
+
+func _on_drag(event: InputEventScreenDrag) -> void:
+	if not _touches.has(event.index):
+		return
+	var before: Dictionary = _touches.duplicate()
+	_touches[event.index] = event.position
+	if event.position.distance_to(_touch_starts[event.index]) > TAP_SLOP:
+		_gesture_moved = true
+	if _flipping or (_gesture_edge != 0 and _gesture_fingers == 1):
+		return  # An edge swipe doesn't pan.
+	if _touches.size() == 1:
+		_pan(event.relative)
+	elif _touches.size() >= 2 and before.size() >= 2:
+		var keys := _touches.keys()
+		var old_a: Vector2 = before.get(keys[0], _touches[keys[0]])
+		var old_b: Vector2 = before.get(keys[1], _touches[keys[1]])
+		var new_a: Vector2 = _touches[keys[0]]
+		var new_b: Vector2 = _touches[keys[1]]
+		var old_distance := old_a.distance_to(old_b)
+		if old_distance > 0.0:
+			_zoom_at((new_a + new_b) / 2.0, new_a.distance_to(new_b) / old_distance)
+		_pan((new_a + new_b - old_a - old_b) / 2.0)
+
+
+## All fingers are up: an edge swipe, a tap or a two-finger tap, or nothing (panned, held).
+func _end_gesture(start: Vector2, end: Vector2) -> void:
+	if _flipping:
+		return
+	if _gesture_edge != 0 and _gesture_fingers == 1:
+		var travel := end - start
+		if -travel.x * _gesture_edge >= SWIPE_PX and absf(travel.x) > absf(travel.y) * 1.5:
+			(swiped_from_left if _gesture_edge < 0 else swiped_from_right).emit()
+			return
+	var now := Time.get_ticks_msec()
+	if _gesture_moved or now - _gesture_start_msec > TAP_SECONDS * 1000.0:
+		return
+	if _gesture_fingers == 1:
+		_on_tap(end)
+	elif _gesture_fingers == 2:
+		if now - _two_finger_tap_msec <= (DOUBLE_TAP_SECONDS + TAP_SECONDS) * 1000.0:
+			_two_finger_tap_msec = -100000
+			two_finger_double_tapped.emit()
+		else:
+			_two_finger_tap_msec = now
+
+
+## A tap waits for a second one; together they make a double tap.
+func _on_tap(position: Vector2) -> void:
+	if _tap_pending:
+		_tap_pending = false
+		if position.distance_to(_tap_position) <= DOUBLE_TAP_SLOP:
+			double_tapped.emit()
+			return
+		tapped.emit()
+	_tap_pending = true
+	_tap_position = position
+	_tap_count += 1
+	var count := _tap_count
+	get_tree().create_timer(DOUBLE_TAP_SECONDS).timeout.connect(func() -> void:
+		if _tap_pending and count == _tap_count:
+			_tap_pending = false
+			tapped.emit())
 
 
 func _pan(delta: Vector2) -> void:
+	_stop_pan()
 	_origin += delta
 	queue_redraw()
 
 
 ## Zooms by `factor`, keeping the point under `focus` in place.
 func _zoom_at(focus: Vector2, factor: float) -> void:
+	_stop_pan()
 	var new_cell_px := clampf(_cell_px * factor, MIN_CELL_PX, MAX_CELL_PX)
 	_origin = focus - (focus - _origin) * (new_cell_px / _cell_px)
 	_cell_px = new_cell_px

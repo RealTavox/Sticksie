@@ -10,13 +10,22 @@ extends Control
 ## `--method=<english|danish>` sets the stitch method, `--back-pass=<whole|blocks>` the Danish
 ## return pass, `--max-block=<n>` the most stitches per block, `--needle=<auto|bottom|top>` and
 ## `--first-leg=<slash|backslash>` the stitch style (bottom/top/first-leg fix it), `--projects` the project list, `--stitch=<code>` starts stitching that thread, `--steps=<n>` confirms n steps, `--back` shows the back while stitching, `--screenshot=<png path>` saves a screenshot after a few
-## frames and quits.
+## frames and quits. `--ui=<touch|desktop>` sets the layout, `--overlays=<menu,pin,list,text>`
+## opens touch overlays (pin: the menu pinned), `--tooltip=<menu|list|text>` shows a round
+## button's tooltip, `--safe-area=<left>,<top>,<right>,<bottom>` pretends the screen has a notch
+## or island (canvas pixels).
+##
+## Two layouts (Preferences.touch_mode()): desktop has a toolbar on top and a side panel; touch
+## shows the pattern on the whole screen with three round buttons: the menu (the toolbar,
+## top left; it closes itself when the view is used unless pinned), the colour list or stitching
+## buttons (bottom left) and the texts (bottom right). The same widgets move between the two.
 
 const SAMPLE_PATH := "res://samples/hypsi_anhaenger.png"
 ## Images bigger than this on either side are refused (most likely a photo, not pixel art).
 const MAX_SIDE := 500
 const BUTTON_HEIGHT := 48.0
-const SWATCH_SIZE := Vector2(28, 28)
+## Rows of left-out colours are faded to this.
+const LEFT_OUT_ALPHA := 0.35
 ## Smallest cell size when stitching starts, so the current block is easy to see.
 const STITCH_CELL_PX := 24.0
 ## Starting light for the test sliders: from the top left, 40° above the fabric.
@@ -41,6 +50,26 @@ const LEG_ORDERS := ["Erst / dann \\", "Erst \\ dann /"]
 const NEEDLE_STARTS := ["Nadel immer unten hoch (Schenkel von unten nach oben)",
 		"Nadel immer oben hoch (Schenkel von oben nach unten)"]
 const CREDIT := "Garnfarben: craft-color-codes von MakeBead (makebead.com), CC BY 4.0"
+const UI_MODES := [
+	"Touch: Muster über den ganzen Bildschirm, runde Knöpfe und Gesten",
+	"Desktop: Werkzeugleiste oben, Seitenleiste daneben",
+]
+## Touch layout: round button size, distance from the screen edge (inside the safe area), and
+## overlay panel width on wide screens.
+const ROUND_BUTTON_PX := 72.0
+const PIN_BUTTON_PX := 52.0
+const TOUCH_MARGIN := 12.0
+const OVERLAY_MAX_WIDTH := 480.0
+const OVERLAY_COLOR := Color(0.13, 0.12, 0.11, 0.84)
+## Opening a touch overlay: it slides in this far (the menu from above, the others from below)
+## while fading in; closing goes the same way back, faster.
+const MENU_SLIDE_PX := 16.0
+const DOCK_SLIDE_PX := 24.0
+const MENU_OPEN_SECONDS := 0.18
+const DOCK_OPEN_SECONDS := 0.2
+const OVERLAY_CLOSE_SECONDS := 0.12
+## After a touch closed the menu, taps within this time only closed it.
+const CLOSE_SWALLOW_MSEC := 700
 
 var _palette: FlossPalette
 var _project: StitchProject
@@ -49,6 +78,25 @@ var _full_pattern: Pattern
 ## Thread index in the project's pattern being stitched, or -1 on the overview.
 var _stitch_thread := -1
 var _style := StitchStyle.new()
+var _touch := false
+## Screen parts kept free for a notch, island or home bar, in canvas pixels: left, top, right,
+## bottom. Read from the display on phones, or set with --safe-area.
+var _safe := Vector4.ZERO
+var _safe_from_cmdline := false
+## The step, hint and thread end last shown, kept visible when overlays open.
+var _shown_step: StitchStep
+var _shown_hint: PositionHint
+var _shown_thread_end := Vector2i(-1, -1)
+## A touch on the view closed the menu; the tap it makes is dropped.
+var _swallow_tap := false
+var _swallow_msec := 0
+## Overlay animations: the running tween per panel, a count per panel so an older call that
+## waits for a frame gives way to a newer one, the panels moving right now, and where the menu
+## rests when open.
+var _overlay_tweens := {}
+var _overlay_calls := {}
+var _overlay_moving := {}
+var _menu_home := Vector2.ZERO
 
 var _open_button: Button
 var _sample_button: Button
@@ -69,7 +117,25 @@ var _needle_start_option: OptionButton
 var _overview_button: Button
 var _side_button: Button
 var _info_label: Label
+var _toolbar: HFlowContainer
+var _light_row: HBoxContainer
+var _desktop_root: MarginContainer
+var _desktop_column: VBoxContainer
 var _body: BoxContainer
+var _touch_root: Control
+var _menu_panel: PanelContainer
+var _menu_content: VBoxContainer
+var _menu_pin: RoundButton
+var _dock: BoxContainer
+var _dock_spacer: Control
+var _list_panel: PanelContainer
+var _list_content: VBoxContainer
+var _text_panel: PanelContainer
+var _text_content: VBoxContainer
+var _menu_button: RoundButton
+var _list_button: RoundButton
+var _text_button: RoundButton
+var _ui_option: OptionButton
 var _view: PatternView
 var _light_azimuth: HSlider
 var _light_elevation: HSlider
@@ -80,16 +146,16 @@ var _file_dialog: FileDialog
 
 
 func _ready() -> void:
-	_palette = FlossPalette.dmc()
-	_build_ui()
-	_apply_light()
-	resized.connect(_update_layout)
-	_update_layout()
 	var opens_image := false
 	for arg in OS.get_cmdline_user_args():
 		if arg.begins_with("--projects-dir="):
 			ProjectStore.directory = arg.trim_prefix("--projects-dir=")
 		opens_image = opens_image or arg.begins_with("--open=")
+	_palette = FlossPalette.dmc()
+	_build_ui()
+	resized.connect(_update_layout)
+	_apply_ui_mode()
+	_apply_light()
 	_apply_style()
 	if not opens_image:
 		var last := ProjectStore.last_project_path()
@@ -107,48 +173,38 @@ func _build_ui() -> void:
 	_file_dialog.file_selected.connect(_open_image)
 	add_child(_file_dialog)
 
-	var margin := MarginContainer.new()
-	margin.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	for side in ["left", "top", "right", "bottom"]:
-		margin.add_theme_constant_override("margin_" + side, 8)
-	add_child(margin)
-	var root := VBoxContainer.new()
-	margin.add_child(root)
-
-	var toolbar := HBoxContainer.new()
-	root.add_child(toolbar)
+	_toolbar = HFlowContainer.new()
 	_open_button = _make_toolbar_button("Bild öffnen…", _file_dialog.popup_centered_ratio.bind(0.8))
-	toolbar.add_child(_open_button)
+	_toolbar.add_child(_open_button)
 	_sample_button = _make_toolbar_button("Beispiel", _open_image.bind(SAMPLE_PATH))
-	toolbar.add_child(_sample_button)
+	_toolbar.add_child(_sample_button)
 	_projects_button = _make_toolbar_button("Projekte", _show_projects)
-	toolbar.add_child(_projects_button)
-	toolbar.add_child(_make_toolbar_button("Einstellungen", _show_settings))
+	_toolbar.add_child(_projects_button)
+	_toolbar.add_child(_make_toolbar_button("Einstellungen", _show_settings))
 	_overview_button = _make_toolbar_button("◂ Übersicht", _leave_stitching)
 	_overview_button.visible = false
-	toolbar.add_child(_overview_button)
+	_toolbar.add_child(_overview_button)
 	_side_button = _make_toolbar_button("Rückseite", _toggle_back_side)
 	_side_button.visible = false
-	toolbar.add_child(_side_button)
+	_toolbar.add_child(_side_button)
 	_info_label = Label.new()
 	_info_label.text = "Öffne ein Pixelart-Bild (PNG). Ein Pixel wird ein Kreuzstich."
 	_info_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_info_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
-	toolbar.add_child(_info_label)
+	_info_label.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	_light_row = _make_light_row()
 
-	root.add_child(_make_light_row())
-
-	_body = BoxContainer.new()
-	_body.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	root.add_child(_body)
 	_view = PatternView.new()
 	_view.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_view.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	_view.tapped.connect(_on_view_tapped)
-	_body.add_child(_view)
+	_view.tapped.connect(_on_view_gesture.bind(_next_step))
+	_view.double_tapped.connect(_on_view_gesture.bind(_previous_step))
+	_view.two_finger_double_tapped.connect(_on_view_gesture.bind(_toggle_new_thread))
+	_view.swiped_from_right.connect(_on_view_gesture.bind(_swipe_side))
+	_view.swiped_from_left.connect(_on_view_gesture.bind(_leave_stitching))
+	_view.touched.connect(_on_view_touched)
 
 	_side = VBoxContainer.new()
-	_body.add_child(_side)
+	_side.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	var heading := Label.new()
 	heading.text = "Garnfarben (DMC) · Stiche"
 	_side.add_child(heading)
@@ -171,13 +227,253 @@ func _build_ui() -> void:
 	_stitch_panel.next_pressed.connect(_next_step)
 	_stitch_panel.previous_pressed.connect(_previous_step)
 	_stitch_panel.new_thread_toggled.connect(_toggle_new_thread)
-	_body.add_child(_stitch_panel)
+	_build_desktop_shell()
+	_build_touch_shell()
 	_build_settings_dialog()
 	_project_browser = ProjectBrowser.new()
 	_project_browser.open_requested.connect(_open_project)
 	_project_browser.project_renamed.connect(_on_project_renamed)
 	_project_browser.project_deleted.connect(_on_project_deleted)
 	add_child(_project_browser)
+
+
+## Toolbar on top, pattern and side panel below (beside each other in landscape); the widgets
+## are put in by _apply_ui_mode().
+func _build_desktop_shell() -> void:
+	_desktop_root = MarginContainer.new()
+	_desktop_root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	for side in ["left", "top", "right", "bottom"]:
+		_desktop_root.add_theme_constant_override("margin_" + side, 8)
+	add_child(_desktop_root)
+	_desktop_column = VBoxContainer.new()
+	_desktop_root.add_child(_desktop_column)
+	_body = BoxContainer.new()
+	_body.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_desktop_column.add_child(_body)
+	_body.add_child(_stitch_panel)
+
+
+## The pattern on the whole screen, overlay panels and the three round buttons above it. Only
+## the panels and buttons take input; the rest goes through to the view.
+func _build_touch_shell() -> void:
+	_touch_root = Control.new()
+	_touch_root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_touch_root.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(_touch_root)
+
+	_menu_panel = _make_overlay_panel()
+	_menu_panel.anchor_right = 1.0
+	_touch_root.add_child(_menu_panel)
+	var menu_row := HBoxContainer.new()
+	_menu_panel.add_child(menu_row)
+	_menu_content = VBoxContainer.new()
+	_menu_content.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	menu_row.add_child(_menu_content)
+	_menu_pin = RoundButton.new(ButtonIcons.Icon.PIN, "Menü anheften: bleibt offen, auch wenn du das Muster bedienst",
+			PIN_BUTTON_PX)
+	_menu_pin.toggle_mode = true
+	_menu_pin.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+	menu_row.add_child(_menu_pin)
+
+	_dock = BoxContainer.new()
+	_dock.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_dock.anchor_top = 1.0
+	_dock.anchor_right = 1.0
+	_dock.anchor_bottom = 1.0
+	_dock.grow_vertical = Control.GROW_DIRECTION_BEGIN
+	_dock.resized.connect(func() -> void: _update_cover.call_deferred())
+	_touch_root.add_child(_dock)
+	_text_panel = _make_overlay_panel()
+	_dock.add_child(_text_panel)
+	_text_content = VBoxContainer.new()
+	_text_panel.add_child(_text_content)
+	_dock_spacer = Control.new()
+	_dock_spacer.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_dock_spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_dock.add_child(_dock_spacer)
+	_list_panel = _make_overlay_panel()
+	_dock.add_child(_list_panel)
+	_list_content = VBoxContainer.new()
+	_list_panel.add_child(_list_content)
+
+	_menu_button = _make_round_button(ButtonIcons.Icon.MENU, "Menü: Bilder, Projekte, Einstellungen", _menu_panel)
+	_list_button = _make_round_button(ButtonIcons.Icon.SPOOL, "", _list_panel)
+	_text_button = _make_round_button(ButtonIcons.Icon.TEXT, "", _text_panel)
+
+
+func _make_overlay_panel() -> PanelContainer:
+	var panel := PanelContainer.new()
+	var style := StyleBoxFlat.new()
+	style.bg_color = OVERLAY_COLOR
+	style.set_corner_radius_all(16)
+	style.set_content_margin_all(12)
+	panel.add_theme_stylebox_override("panel", style)
+	panel.visible = false
+	panel.visibility_changed.connect(func() -> void: _update_cover.call_deferred())
+	return panel
+
+
+## A round button in the touch layout that opens and closes `panel`.
+func _make_round_button(icon: ButtonIcons.Icon, tooltip: String, panel: Control) -> RoundButton:
+	var button := RoundButton.new(icon, tooltip, ROUND_BUTTON_PX)
+	button.toggle_mode = true
+	button.toggled.connect(func(on: bool) -> void: _set_overlay(panel, button, on))
+	_touch_root.add_child(button)
+	return button
+
+
+## Opens or closes a touch overlay together with its button; with `animate` it slides and
+## fades (the view keeps the current step clear of it once it has arrived).
+func _set_overlay(panel: Control, button: RoundButton, open: bool, animate := true) -> void:
+	button.set_pressed_no_signal(open)
+	var call: int = _overlay_calls.get(panel, 0) + 1
+	_overlay_calls[panel] = call
+	var tween: Tween = _overlay_tweens.get(panel)
+	if tween != null:
+		tween.kill()
+		_overlay_tweens.erase(panel)
+		_rest_overlay(panel)
+	if not animate or not _touch or (open == panel.visible and tween == null):
+		_overlay_moving.erase(panel)
+		panel.visible = open
+		_update_cover.call_deferred()
+		return
+	_overlay_moving[panel] = true
+	var menu := panel == _menu_panel
+	# Panels stacked with this one move along as if joined to it: each glides to `followers[it]`,
+	# and this one slides as far as they do instead of DOCK_SLIDE_PX.
+	var followers := {}
+	var slide := Vector2(0.0, -MENU_SLIDE_PX if menu else DOCK_SLIDE_PX)
+	if open and not panel.visible:
+		var before := _dock_neighbours(panel)
+		panel.modulate.a = 0.0
+		panel.visible = true
+		await get_tree().process_frame  # The dock places it first.
+		if _overlay_calls[panel] != call:
+			return
+		# The dock grows upwards, so compare on screen, not inside it.
+		for other: Control in before:
+			if other.global_position != before[other]:
+				followers[other] = other.global_position
+				slide = before[other] - other.global_position
+				other.global_position = before[other]
+	elif not open and not menu and _dock.vertical:
+		var shift := Vector2(0.0, panel.size.y + _dock.get_theme_constant("separation"))
+		for other: Control in _dock_neighbours(panel):
+			if other.position.y < panel.position.y:
+				followers[other] = other.global_position + shift
+				slide = shift
+	var home := panel.global_position
+	var away := home + slide
+	var seconds := (MENU_OPEN_SECONDS if menu else DOCK_OPEN_SECONDS) if open else OVERLAY_CLOSE_SECONDS
+	var easing := Tween.EASE_OUT if open else Tween.EASE_IN
+	var trans := Tween.TRANS_BACK if open and not menu and followers.is_empty() else Tween.TRANS_CUBIC
+	tween = create_tween().set_parallel()
+	_overlay_tweens[panel] = tween
+	if open:
+		panel.global_position = away
+	tween.tween_property(panel, "global_position", home if open else away, seconds).set_ease(easing).set_trans(trans)
+	tween.tween_property(panel, "modulate:a", 1.0 if open else 0.0, seconds)
+	for other: Control in followers:
+		tween.tween_property(other, "global_position", followers[other], seconds).set_ease(easing).set_trans(trans)
+	tween.chain().tween_callback(func() -> void:
+		_overlay_tweens.erase(panel)
+		_overlay_moving.erase(panel)
+		if not open:
+			panel.visible = false
+		_rest_overlay(panel)
+		_update_cover())
+
+
+## The other open panels in the dock that aren't moving themselves, with their positions on
+## screen.
+func _dock_neighbours(panel: Control) -> Dictionary:
+	var result := {}
+	for other: Control in [_list_panel, _text_panel]:
+		if other != panel and other.visible and not _overlay_moving.has(other):
+			result[other] = other.global_position
+	return result
+
+
+## Puts a panel back where its layout wants it, fully opaque.
+func _rest_overlay(panel: Control) -> void:
+	panel.modulate.a = 1.0
+	if panel == _menu_panel:
+		panel.position = _menu_home
+	else:
+		_dock.queue_sort()
+
+
+## Closes the menu in the touch layout unless it is pinned; true if it was open and closed.
+func _close_menu_unless_pinned() -> bool:
+	if not _touch or not _menu_panel.visible or _menu_pin.button_pressed:
+		return false
+	_set_overlay(_menu_panel, _menu_button, false)
+	return true
+
+
+## Moves the shared widgets into the desktop or the touch layout (Preferences.touch_mode()).
+func _apply_ui_mode() -> void:
+	_touch = Preferences.touch_mode()
+	_desktop_root.visible = not _touch
+	_touch_root.visible = _touch
+	_stitch_panel.set_touch(_touch)
+	_info_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART if _touch else TextServer.AUTOWRAP_OFF
+	_info_label.text_overrun_behavior = (TextServer.OVERRUN_NO_TRIMMING if _touch
+			else TextServer.OVERRUN_TRIM_ELLIPSIS)
+	if _touch:
+		_place(_view, _touch_root, 0)
+		_view.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+		_place(_toolbar, _menu_content, 0)
+		_place(_light_row, _menu_content, 1)
+		_place(_info_label, _text_content, 0)
+		_place(_stitch_panel.info, _text_content, 1)
+		_place(_side, _list_content, 0)
+		_place(_stitch_panel.controls, _list_content, 1)
+		if _project == null:
+			_set_overlay(_menu_panel, _menu_button, true)
+	else:
+		_place(_toolbar, _desktop_column, 0)
+		_place(_info_label, _toolbar)
+		_place(_light_row, _desktop_column, 1)
+		_place(_view, _body, 0)
+		_place(_side, _body, 1)
+		_place(_stitch_panel.info, _stitch_panel, 0)
+		_place(_stitch_panel.controls, _stitch_panel, 1)
+	_update_visibility()
+	_update_layout()
+
+
+## Makes `node` a child of `parent` at `index` (last if -1), moving it from where it was.
+static func _place(node: Node, parent: Node, index := -1) -> void:
+	if node.get_parent() == null:
+		parent.add_child(node)
+	elif node.get_parent() != parent:
+		node.reparent(parent, false)
+	parent.move_child(node, index if index >= 0 else parent.get_child_count() - 1)
+
+
+## Shows the widgets for the overview or for stitching, in the current layout.
+func _update_visibility() -> void:
+	var stitching := _stitch_thread >= 0
+	_open_button.visible = not stitching
+	_sample_button.visible = not stitching
+	_projects_button.visible = not stitching
+	_overview_button.visible = stitching
+	_side_button.visible = stitching
+	_side.visible = not stitching
+	_stitch_panel.visible = stitching and not _touch
+	_info_label.visible = not (stitching and _touch)
+	_stitch_panel.info.visible = stitching or not _touch
+	_stitch_panel.controls.visible = stitching or not _touch
+	if stitching:
+		_list_button.icon = ButtonIcons.Icon.NEEDLE
+		_list_button.tooltip = "Sticken: zurück, gestickt, neuer Faden"
+		_text_button.tooltip = "Anleitung zum Schritt ein- und ausblenden"
+	else:
+		_list_button.icon = ButtonIcons.Icon.SPOOL
+		_list_button.tooltip = "Garnfarben: eine Farbe zum Sticken wählen"
+		_text_button.tooltip = "Projektinfo ein- und ausblenden"
 
 
 ## Test controls for the light on fabric and thread (direction and height above the fabric), to
@@ -210,6 +506,8 @@ func _make_light_slider(from: float, to: float, value: float) -> HSlider:
 
 func _apply_light() -> void:
 	_view.set_light(_light_azimuth.value, _light_elevation.value)
+	for button: RoundButton in [_menu_button, _list_button, _text_button, _menu_pin]:
+		button.set_light(_light_azimuth.value, _light_elevation.value)
 
 
 func _build_settings_dialog() -> void:
@@ -221,6 +519,12 @@ func _build_settings_dialog() -> void:
 	add_child(_settings_dialog)
 	var content := VBoxContainer.new()
 	_settings_dialog.add_child(content)
+	var ui_label := Label.new()
+	ui_label.text = "Bedienung:"
+	content.add_child(ui_label)
+	_ui_option = _make_option(UI_MODES)
+	content.add_child(_ui_option)
+	content.add_child(HSeparator.new())
 	var method_label := Label.new()
 	method_label.text = "Stichmethode:"
 	content.add_child(method_label)
@@ -338,17 +642,127 @@ func _make_toolbar_button(text: String, on_pressed: Callable) -> Button:
 	button.text = text
 	button.custom_minimum_size.y = BUTTON_HEIGHT
 	button.focus_mode = Control.FOCUS_NONE
-	button.pressed.connect(on_pressed)
+	button.pressed.connect(func() -> void:
+		_close_menu_unless_pinned()
+		on_pressed.call())
 	return button
 
 
-## Portrait: pattern above the side panel; landscape: side panel on the right.
 func _update_layout() -> void:
+	if _touch:
+		_layout_touch()
+		return
+	_view.set_covered(0.0, 0.0)
+	# Portrait: pattern above the side panel; landscape: side panel on the right.
 	var portrait := size.y > size.x
 	_body.vertical = portrait
-	var side_size := Vector2(0.0, size.y * 0.38) if portrait else Vector2(minf(380.0, size.x * 0.4), 0.0)
+	var side_size := Vector2(0.0, size.y * 0.38) if portrait else Vector2(minf(560.0, size.x * 0.4), 0.0)
 	_side.custom_minimum_size = side_size
 	_stitch_panel.custom_minimum_size = side_size
+
+
+## Round buttons in three corners inside the safe area; the menu right of its button, the
+## other panels above the bottom buttons: stacked in portrait (texts on top), side by side in
+## landscape.
+func _layout_touch() -> void:
+	_read_safe_area()
+	var portrait := size.y > size.x
+	var left := _safe.x + TOUCH_MARGIN
+	var right := size.x - _safe.z - TOUCH_MARGIN
+	var bottom_row := size.y - _safe.w - TOUCH_MARGIN - ROUND_BUTTON_PX
+	_menu_button.position = Vector2(left, _safe.y + TOUCH_MARGIN)
+	_list_button.position = Vector2(left, bottom_row)
+	_text_button.position = Vector2(right - ROUND_BUTTON_PX, bottom_row)
+	for button: Control in [_menu_button, _list_button, _text_button]:
+		button.size = button.custom_minimum_size
+
+	_menu_panel.offset_left = left + ROUND_BUTTON_PX + TOUCH_MARGIN * 0.5
+	_menu_panel.offset_right = -_safe.z - TOUCH_MARGIN
+	_menu_panel.offset_top = _safe.y + TOUCH_MARGIN
+	_menu_panel.offset_bottom = _menu_panel.offset_top
+	_menu_home = _menu_panel.position
+
+	_dock.vertical = portrait
+	_dock.offset_left = left
+	_dock.offset_right = -_safe.z - TOUCH_MARGIN
+	_dock.offset_bottom = bottom_row - size.y - TOUCH_MARGIN * 0.5
+	_dock.offset_top = _dock.offset_bottom
+	_dock_spacer.visible = not portrait
+	var width := 0.0 if portrait else minf(OVERLAY_MAX_WIDTH, (right - left - TOUCH_MARGIN) / 2.0)
+	for panel: Control in [_list_panel, _text_panel]:
+		panel.custom_minimum_size.x = width
+		panel.size_flags_vertical = Control.SIZE_FILL if portrait else Control.SIZE_SHRINK_END
+	# Portrait: texts above the buttons' panel; landscape: buttons' panel left, texts right.
+	_dock.move_child(_text_panel, 0 if portrait else 2)
+	_dock.move_child(_list_panel, 2 if portrait else 0)
+	var room := bottom_row - _safe.y - TOUCH_MARGIN * 2.0
+	_side.custom_minimum_size = Vector2(0.0, room * (0.45 if portrait else 0.75))
+	_update_cover.call_deferred()
+
+
+## The screen's safe area in canvas pixels; only phones and tablets report one.
+func _read_safe_area() -> void:
+	if _safe_from_cmdline or not OS.has_feature("mobile"):
+		return
+	var safe := Rect2(DisplayServer.get_display_safe_area())
+	var to_canvas := get_viewport().get_final_transform().affine_inverse()
+	var top_left := to_canvas * safe.position
+	var bottom_right := to_canvas * safe.end
+	var screen := get_viewport_rect().size
+	_safe = Vector4(maxf(top_left.x, 0.0), maxf(top_left.y, 0.0),
+			maxf(screen.x - bottom_right.x, 0.0), maxf(screen.y - bottom_right.y, 0.0))
+
+
+## Tells the view what the open overlays cover, and keeps the current step clear of them.
+func _update_cover() -> void:
+	if not _touch or not _overlay_moving.is_empty():
+		return  # A moving overlay calls again when it has arrived.
+	var top := _safe.y
+	if _menu_panel.visible:
+		top = _menu_panel.get_rect().end.y
+	var bottom := size.y - _list_button.position.y
+	if _list_panel.visible or _text_panel.visible:
+		bottom = size.y - _dock.get_rect().position.y
+	_view.set_covered(top, bottom)
+	if _stitch_thread >= 0 and _shown_step != null:
+		_view.ensure_visible(_shown_step, _shown_hint, _shown_thread_end, true)
+
+
+## Any touch on the view closes the menu unless it is pinned; the tap that closed it does
+## nothing else.
+func _on_view_touched() -> void:
+	var now := Time.get_ticks_msec()
+	if _close_menu_unless_pinned():
+		_swallow_tap = true
+		_swallow_msec = now
+	elif now - _swallow_msec > CLOSE_SWALLOW_MSEC:
+		_swallow_tap = false
+
+
+func _on_view_gesture(action: Callable) -> void:
+	if _swallow_tap:
+		_swallow_tap = false
+		return
+	action.call()
+
+
+## The overview in the touch layout starts with the colour list and the project info open.
+func _open_overview_panels() -> void:
+	if _touch and _project != null:
+		_set_overlay(_list_panel, _list_button, true)
+		_set_overlay(_text_panel, _text_button, true)
+
+
+func _swipe_side() -> void:
+	if _stitch_thread >= 0:
+		_toggle_back_side()
+
+
+## A message for the user: in the info line, which the touch layout opens if it is closed.
+func _show_message(text: String) -> void:
+	_info_label.text = text
+	if _touch and _stitch_thread < 0:
+		_set_overlay(_text_panel, _text_button, true)
 
 
 func _unhandled_key_input(event: InputEvent) -> void:
@@ -370,11 +784,11 @@ func _open_image(path: String) -> void:
 	else:
 		image = Image.load_from_file(path)
 	if image == null or image.is_empty():
-		_info_label.text = "Bild konnte nicht geladen werden."
+		_show_message("Bild konnte nicht geladen werden.")
 		return
 	if image.get_width() > MAX_SIDE or image.get_height() > MAX_SIDE:
-		_info_label.text = "Bild ist zu groß (%d × %d), höchstens %d Pixel pro Seite." % [
-				image.get_width(), image.get_height(), MAX_SIDE]
+		_show_message("Bild ist zu groß (%d × %d), höchstens %d Pixel pro Seite." % [
+				image.get_width(), image.get_height(), MAX_SIDE])
 		return
 	if image.is_compressed():
 		image.decompress()
@@ -383,6 +797,7 @@ func _open_image(path: String) -> void:
 
 
 func _show_settings() -> void:
+	_ui_option.selected = 0 if Preferences.touch_mode() else 1
 	var limit := Preferences.max_skip()
 	_limit_box.button_pressed = limit != StitchPlanner.UNLIMITED
 	_limit_spin.editable = _limit_box.button_pressed
@@ -407,6 +822,9 @@ static func _corner_index(top_to_bottom: bool, start_left: bool) -> int:
 
 ## Stores the preferences and replans the open project; stitched cells stay stitched.
 func _apply_settings() -> void:
+	if (_ui_option.selected == 0) != Preferences.touch_mode():
+		Preferences.set_touch_mode(_ui_option.selected == 0)
+		_apply_ui_mode()
 	var limit := int(_limit_spin.value) if _limit_box.button_pressed else StitchPlanner.UNLIMITED
 	Preferences.set_max_skip(limit)
 	var corner: Array = START_CORNERS[_corner_option.selected]
@@ -446,7 +864,7 @@ func _apply_style() -> void:
 func _open_project(path: String) -> void:
 	var project := ProjectStore.load_project(path)
 	if project == null:
-		_info_label.text = "Projekt konnte nicht geladen werden."
+		_show_message("Projekt konnte nicht geladen werden.")
 		return
 	_set_project(project)
 	ProjectStore.remember_last(path)
@@ -454,10 +872,12 @@ func _open_project(path: String) -> void:
 
 func _set_project(project: StitchProject) -> void:
 	_leave_stitching()
+	_close_menu_unless_pinned()
 	_project = project
 	_apply_preferences()
 	_full_pattern = project.full_pattern(_palette)
 	_show_pattern(false)
+	_open_overview_panels()
 
 
 func _show_pattern(keep_view: bool) -> void:
@@ -470,7 +890,7 @@ func _show_pattern(keep_view: bool) -> void:
 func _save() -> void:
 	var error := ProjectStore.save(_project)
 	if error != OK:
-		_info_label.text = "Speichern fehlgeschlagen: %s" % error_string(error)
+		_show_message("Speichern fehlgeschlagen: %s" % error_string(error))
 		return
 	ProjectStore.remember_last(_project.path)
 
@@ -508,7 +928,7 @@ func _on_project_deleted(path: String) -> void:
 	_view.clear()
 	for child in _color_list.get_children():
 		child.queue_free()
-	_info_label.text = "Projekt gelöscht. Öffne ein Bild oder ein anderes Projekt."
+	_show_message("Projekt gelöscht. Öffne ein Bild oder ein anderes Projekt.")
 
 
 ## One row per thread of the image, most stitches first.
@@ -527,18 +947,18 @@ func _make_color_row(floss: FlossColor, count: int) -> Control:
 	var session := _project.session
 	var thread := _project.pattern.thread_codes.find(floss.code)
 	var row := HBoxContainer.new()
-	var swatch := ColorRect.new()
-	swatch.color = floss.color
-	swatch.custom_minimum_size = SWATCH_SIZE
-	row.add_child(swatch)
+	var left_out := _project.fabric_codes.has(floss.code)
+	row.add_child(SkeinSwatch.new(floss.color))
 	var code_label := Label.new()
 	code_label.text = floss.code
 	code_label.custom_minimum_size.x = 56.0
+	code_label.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	row.add_child(code_label)
 	var name_label := Label.new()
 	name_label.text = floss.name
 	name_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	name_label.clip_text = true
+	name_label.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	row.add_child(name_label)
 	var count_label := Label.new()
 	count_label.text = str(count)
@@ -546,11 +966,13 @@ func _make_color_row(floss: FlossColor, count: int) -> Control:
 		count_label.text = "%d / %d" % [session.finished_crosses(thread), count]
 	count_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	count_label.custom_minimum_size.x = 56.0
+	count_label.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	row.add_child(count_label)
 	var fabric_box := CheckBox.new()
-	fabric_box.text = "Stoff"
-	fabric_box.button_pressed = _project.fabric_codes.has(floss.code)
+	fabric_box.text = "Auslassen"
+	fabric_box.button_pressed = left_out
 	fabric_box.focus_mode = Control.FOCUS_NONE
+	fabric_box.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	# Changing the fabric rebuilds the pattern, which would lose the stitching progress.
 	fabric_box.disabled = session.has_progress()
 	fabric_box.tooltip_text = ("Geht nicht mehr, es wurde schon gestickt." if fabric_box.disabled
@@ -558,11 +980,19 @@ func _make_color_row(floss: FlossColor, count: int) -> Control:
 	fabric_box.toggled.connect(_on_fabric_toggled.bind(floss.code))
 	row.add_child(fabric_box)
 	var stitch_button := Button.new()
-	stitch_button.text = "Sticken ▸"
+	stitch_button.icon = ButtonIcons.button_icon(ButtonIcons.Icon.STITCH, 40)
+	stitch_button.tooltip_text = "Diese Farbe sticken"
+	stitch_button.custom_minimum_size = Vector2(56, 40)
+	stitch_button.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	stitch_button.focus_mode = Control.FOCUS_NONE
 	stitch_button.disabled = thread < 0
 	stitch_button.pressed.connect(_enter_stitching.bind(thread))
 	row.add_child(stitch_button)
+	# A left-out colour stays fabric: the whole row fades, only the box stays clear to undo it.
+	if left_out:
+		for child: Control in row.get_children():
+			if child != fabric_box:
+				child.modulate.a = LEFT_OUT_ALPHA
 	return row
 
 
@@ -581,13 +1011,7 @@ func _on_fabric_toggled(pressed: bool, code: String) -> void:
 
 func _enter_stitching(thread: int) -> void:
 	_stitch_thread = thread
-	_side.visible = false
-	_stitch_panel.visible = true
-	_open_button.visible = false
-	_sample_button.visible = false
-	_projects_button.visible = false
-	_overview_button.visible = true
-	_side_button.visible = true
+	_update_visibility()
 	var step := _project.session.current_step(thread)
 	if step != null:
 		_view.focus_step(step, STITCH_CELL_PX)
@@ -599,17 +1023,13 @@ func _leave_stitching() -> void:
 	if _stitch_thread < 0:
 		return
 	_stitch_thread = -1
-	_stitch_panel.visible = false
-	_side.visible = true
-	_open_button.visible = true
-	_sample_button.visible = true
-	_projects_button.visible = true
-	_overview_button.visible = false
-	_side_button.visible = false
+	_shown_step = null
+	_update_visibility()
 	_set_back_side(false)
 	_view.show_preview()
 	_show_info()
 	_fill_color_list()
+	_open_overview_panels()
 
 
 func _refresh_stitching() -> void:
@@ -635,6 +1055,9 @@ func _refresh_stitching() -> void:
 		thread_end = session.last_cell(thread)
 	var new_thread := step != null and thread_start != StitchSession.ThreadStart.NONE
 	_view.show_progress(states, step, hint, thread_end, new_thread)
+	_shown_step = step
+	_shown_hint = hint
+	_shown_thread_end = thread_end
 	if _view.back_side:
 		_show_back(step)
 	if step != null:
@@ -715,6 +1138,8 @@ func _handle_cmdline() -> void:
 	var back := false
 	var flip := -1.0
 	var zoom := 0.0
+	var overlays := PackedStringArray()
+	var tooltip := ""
 	for arg in OS.get_cmdline_user_args():
 		if arg.begins_with("--open="):
 			_open_image(arg.trim_prefix("--open="))
@@ -768,6 +1193,19 @@ func _handle_cmdline() -> void:
 			Preferences.set_direction(not corner.begins_with("bottom"), not corner.ends_with("right"))
 			if _project != null:
 				_apply_preferences()
+		elif arg.begins_with("--ui="):
+			Preferences.set_touch_mode(arg.trim_prefix("--ui=") == "touch")
+			_apply_ui_mode()
+		elif arg.begins_with("--overlays="):
+			overlays = arg.trim_prefix("--overlays=").split(",")
+		elif arg.begins_with("--tooltip="):
+			tooltip = arg.trim_prefix("--tooltip=")
+		elif arg.begins_with("--safe-area="):
+			var sides := arg.trim_prefix("--safe-area=").split(",")
+			if sides.size() == 4:
+				_safe = Vector4(sides[0].to_float(), sides[1].to_float(), sides[2].to_float(), sides[3].to_float())
+				_safe_from_cmdline = true
+				_update_layout()
 		elif arg.begins_with("--screenshot="):
 			screenshot_path = arg.trim_prefix("--screenshot=")
 	if not stitch_code.is_empty() and _project != null and _project.pattern.thread_codes.has(stitch_code):
@@ -782,8 +1220,20 @@ func _handle_cmdline() -> void:
 			_toggle_back_side()
 			if flip >= 0.0:
 				_view.hold_flip(flip)
+	if _touch and (not overlays.is_empty() or not tooltip.is_empty()):
+		_set_overlay(_menu_panel, _menu_button, overlays.has("menu") or overlays.has("pin"), false)
+		_menu_pin.button_pressed = overlays.has("pin")
+		_set_overlay(_list_panel, _list_button, overlays.has("list"), false)
+		_set_overlay(_text_panel, _text_button, overlays.has("text"), false)
+		var tooltip_button: RoundButton = {"menu": _menu_button, "list": _list_button,
+				"text": _text_button}.get(tooltip)
+		if tooltip_button != null:
+			await get_tree().process_frame
+			tooltip_button.show_tooltip()
 	if screenshot_path.is_empty():
 		return
+	while not _overlay_moving.is_empty() or _view.is_panning():
+		await get_tree().process_frame
 	if _view.is_flipping() and flip < 0.0:
 		await _view.flip_finished
 	for i in 3:

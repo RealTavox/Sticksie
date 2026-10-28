@@ -2,7 +2,8 @@ class_name StitchPanel
 extends VBoxContainer
 ## Guided stitching controls: which thread, what the current step is, progress, back/next, and
 ## starting a new thread by hand. The buttons never take focus, so the space bar always reaches
-## the screen's key handling.
+## the screen's key handling. The texts sit in `info` and the buttons in `controls`; the touch
+## layout moves the two into separate overlays.
 
 signal next_pressed
 signal previous_pressed
@@ -10,6 +11,14 @@ signal new_thread_toggled
 
 const BUTTON_HEIGHT := 64.0
 const STEP_FONT_SIZE := 24
+const DESKTOP_HINT := "Weiter: Knopf, Tippen aufs Muster oder Leertaste · Zurück: Doppeltippen"
+const TOUCH_HINT := ("Tippen: weiter · Doppeltippen: zurück · mit zwei Fingern doppeltippen: neuer Faden\n"
+		+ "Vom rechten Rand wischen: Rückseite · vom linken Rand: Übersicht")
+
+## The texts: thread, step, where to start, progress.
+var info := VBoxContainer.new()
+## The buttons and the gesture hint.
+var controls := VBoxContainer.new()
 
 var _swatch: ColorRect
 var _thread_label: Label
@@ -20,11 +29,15 @@ var _progress_label: Label
 var _previous_button: Button
 var _next_button: Button
 var _new_thread_button: Button
+var _hint_label: Label
 
 
 func _init() -> void:
+	info.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	add_child(info)
+	add_child(controls)
 	var header := HBoxContainer.new()
-	add_child(header)
+	info.add_child(header)
 	_swatch = ColorRect.new()
 	_swatch.custom_minimum_size = Vector2(32, 32)
 	header.add_child(_swatch)
@@ -36,21 +49,21 @@ func _init() -> void:
 	_step_label = Label.new()
 	_step_label.add_theme_font_size_override("font_size", STEP_FONT_SIZE)
 	_step_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	add_child(_step_label)
+	info.add_child(_step_label)
 	_detail_label = Label.new()
 	_detail_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_detail_label.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	add_child(_detail_label)
+	info.add_child(_detail_label)
 
 	_progress_bar = ProgressBar.new()
 	_progress_bar.show_percentage = false
-	add_child(_progress_bar)
+	info.add_child(_progress_bar)
 	_progress_label = Label.new()
 	_progress_label.modulate.a = 0.7
-	add_child(_progress_label)
+	info.add_child(_progress_label)
 
 	var buttons := HBoxContainer.new()
-	add_child(buttons)
+	controls.add_child(buttons)
 	_previous_button = _make_button("◂ Zurück")
 	_previous_button.pressed.connect(previous_pressed.emit)
 	buttons.add_child(_previous_button)
@@ -63,12 +76,18 @@ func _init() -> void:
 	_new_thread_button.custom_minimum_size.y = BUTTON_HEIGHT * 0.75
 	_new_thread_button.tooltip_text = "Der Faden ist zu kurz oder verknotet: vor diesem Schritt einen neuen Faden nehmen."
 	_new_thread_button.pressed.connect(new_thread_toggled.emit)
-	add_child(_new_thread_button)
-	var hint := Label.new()
-	hint.text = "Weiter: Knopf, Tippen aufs Muster oder Leertaste"
-	hint.add_theme_font_size_override("font_size", 12)
-	hint.modulate.a = 0.6
-	add_child(hint)
+	controls.add_child(_new_thread_button)
+	_hint_label = Label.new()
+	_hint_label.text = DESKTOP_HINT
+	_hint_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_hint_label.add_theme_font_size_override("font_size", 12)
+	_hint_label.modulate.a = 0.6
+	controls.add_child(_hint_label)
+
+
+## Names the touch gestures in the hint instead of the keys.
+func set_touch(touch: bool) -> void:
+	_hint_label.text = TOUCH_HINT if touch else DESKTOP_HINT
 
 
 ## `step` is null when the thread is finished; `position_text` comes from describe_position();

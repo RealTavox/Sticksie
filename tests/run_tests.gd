@@ -33,6 +33,9 @@ func _initialize() -> void:
 	_test_english()
 	_test_whole_back_pass()
 	_test_max_block()
+	# The root joins the tree only once the main loop runs; gestures need it for their timers.
+	await process_frame
+	_test_gestures()
 	if _failures == 0:
 		print("All tests passed.")
 	else:
@@ -818,3 +821,58 @@ func _test_max_block() -> void:
 			_check(step.cells.size() <= 2, "english %s: blocks of 2" % english)
 		session.set_max_block(StitchPlanner.DEFAULT_MAX_BLOCK)
 	_check(Preferences.max_block() >= 1, "preference readable")
+
+
+## Gestures on the pattern view, fed as touch events (the mouse arrives the same way).
+func _test_gestures() -> void:
+	var view := PatternView.new()
+	root.add_child(view)
+	view.size = Vector2(400, 600)
+	var counts := {}
+	for name in ["tapped", "double_tapped", "two_finger_double_tapped", "swiped_from_left",
+			"swiped_from_right", "touched"]:
+		counts[name] = 0
+		view.connect(name, func() -> void: counts[name] += 1)
+	var swipe := func(from: Vector2, to: Vector2) -> void:
+		_touch(view, 0, from, true)
+		_drag(view, 0, from.lerp(to, 0.5))
+		_drag(view, 0, to)
+		_touch(view, 0, to, false)
+	swipe.call(Vector2(10, 300), Vector2(150, 310))
+	_check(counts.swiped_from_left == 1, "swipe in from the left edge")
+	swipe.call(Vector2(395, 300), Vector2(250, 300))
+	_check(counts.swiped_from_right == 1, "swipe in from the right edge")
+	swipe.call(Vector2(10, 300), Vector2(60, 300))
+	swipe.call(Vector2(10, 100), Vector2(120, 400))
+	swipe.call(Vector2(200, 300), Vector2(380, 300))
+	_check(counts.swiped_from_left == 1 and counts.swiped_from_right == 1,
+			"short, steep or mid-screen swipes are no edge swipes")
+	_check(counts.tapped + counts.double_tapped == 0, "swipes are no taps")
+	for i in 2:
+		_touch(view, 0, Vector2(200, 200), true)
+		_touch(view, 0, Vector2(202, 201), false)
+	_check(counts.double_tapped == 1 and counts.tapped == 0, "double tap")
+	for i in 2:
+		_touch(view, 0, Vector2(100, 300), true)
+		_touch(view, 1, Vector2(250, 300), true)
+		_touch(view, 0, Vector2(100, 300), false)
+		_touch(view, 1, Vector2(250, 300), false)
+	_check(counts.two_finger_double_tapped == 1, "double tap with two fingers")
+	_check(counts.tapped + counts.double_tapped == 1, "two-finger taps are no one-finger taps")
+	_check(counts.touched == 9, "every gesture starts with touched, got %d" % counts.touched)
+	view.free()
+
+
+func _touch(view: PatternView, index: int, position: Vector2, pressed: bool) -> void:
+	var event := InputEventScreenTouch.new()
+	event.index = index
+	event.position = position
+	event.pressed = pressed
+	view._gui_input(event)
+
+
+func _drag(view: PatternView, index: int, position: Vector2) -> void:
+	var event := InputEventScreenDrag.new()
+	event.index = index
+	event.position = position
+	view._gui_input(event)
