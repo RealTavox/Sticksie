@@ -20,6 +20,7 @@ func _initialize() -> void:
 	_test_session()
 	_test_position_hint()
 	_test_describe_offset()
+	_test_contrast_color()
 	_test_session_restore()
 	_test_project_round_trip()
 	_test_project_rejects_bad_data()
@@ -405,6 +406,20 @@ func _test_position_hint() -> void:
 	_check(bent.corner() == Vector2i(3, 0), "corner after the longer horizontal leg")
 	_check(PositionHint._counting_path(bent.reference, bent.target)
 			== [Vector2i(1, 0), Vector2i(2, 0), Vector2i(3, 0), Vector2i(3, 1)], "bent path")
+
+
+func _test_contrast_color() -> void:
+	_check(PatternView.contrast_color(Color(0.9, 0.45, 0.1), PatternView.HIGHLIGHT_COLOR,
+			PatternView.HIGHLIGHT_ALT_COLOR) == PatternView.HIGHLIGHT_ALT_COLOR, "blue frame on orange thread")
+	_check(PatternView.contrast_color(Color(0.1, 0.2, 0.7), PatternView.HIGHLIGHT_COLOR,
+			PatternView.HIGHLIGHT_ALT_COLOR) == PatternView.HIGHLIGHT_COLOR, "orange frame on blue thread")
+	var enough := PatternView.MARK_MIN_DELTA_E
+	_check(PatternView.contrast_color(Color(0.8, 0.1, 0.1), PatternView.THREAD_END_COLOR,
+			PatternView.THREAD_END_ALT_COLOR, enough) == PatternView.THREAD_END_ALT_COLOR, "dark end mark on red thread")
+	_check(PatternView.contrast_color(Color.WHITE, PatternView.THREAD_END_COLOR,
+			PatternView.THREAD_END_ALT_COLOR, enough) == PatternView.THREAD_END_COLOR, "red end mark stays on white thread")
+	_check(PatternView.contrast_color(Color(0.1, 0.55, 0.2), PatternView.THREAD_START_COLOR,
+			PatternView.THREAD_START_ALT_COLOR, enough) == PatternView.THREAD_START_ALT_COLOR, "pink start mark on green thread")
 
 
 func _test_describe_offset() -> void:

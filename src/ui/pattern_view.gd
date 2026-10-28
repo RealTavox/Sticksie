@@ -25,18 +25,29 @@ signal flip_finished
 
 ## Background of labels and counts (light Aida fabric).
 const FABRIC_COLOR := StitchScene.FABRIC_COLOR
+## The current step: orange, or the blue of the round buttons where that stands out more from
+## the thread (see contrast_color()).
 const HIGHLIGHT_COLOR := Color(1.0, 0.5, 0.05)
+const HIGHLIGHT_ALT_COLOR := Color(0.17, 0.47, 0.88)
 ## Reference stitch of the position hint, and the left/right leg of its counting path.
 const HINT_COLOR := Color(0.1, 0.45, 0.95)
 ## The up/down leg of the counting path.
 const HINT_VERTICAL_COLOR := Color(0.7, 0.1, 0.65)
 ## Below this cell size the counting path shows dots instead of numbers.
 const MIN_NUMBER_CELL_PX := 14.0
-## Where the old thread ends (to be secured) and where a new one begins.
+## Where the old thread ends (to be secured) and where a new one begins, each with a second
+## colour for threads closer than MARK_MIN_DELTA_E to the first.
 const THREAD_END_COLOR := Color(0.85, 0.15, 0.15)
+const THREAD_END_ALT_COLOR := Color(0.12, 0.12, 0.16)
 const THREAD_START_COLOR := Color(0.1, 0.6, 0.25)
+const THREAD_START_ALT_COLOR := Color(0.8, 0.15, 0.6)
+## A thread mark keeps its usual colour while it differs at least this much from the thread
+## (CIEDE2000), so the colours keep their meaning where they can.
+const MARK_MIN_DELTA_E := 30.0
 ## Below this cell size the thread markers have no text labels.
 const MIN_LABEL_CELL_PX := 14.0
+## Below this cell size the current step shows no arrows along its legs.
+const MIN_ARROW_CELL_PX := 12.0
 const MIN_CELL_PX := 2.0
 const MAX_CELL_PX := 96.0
 const FIT_MARGIN := 16.0
@@ -97,6 +108,12 @@ var _hint: PositionHint
 var _thread_end := Vector2i(-1, -1)
 ## Whether the highlighted step begins with a new thread.
 var _new_thread := false
+## Screen rects of the badges and labels drawn so far this frame, so labels can avoid them.
+var _taken: Array[Rect2] = []
+## Colours of the marks for the threads shown now (see contrast_color()).
+var _highlight_color := HIGHLIGHT_COLOR
+var _thread_end_color := THREAD_END_COLOR
+var _thread_start_color := THREAD_START_COLOR
 ## Size of one cell on screen, in pixels.
 var _cell_px := 10.0
 ## Top left corner of the grid, in local coordinates.
@@ -168,9 +185,30 @@ func show_progress(states: PackedByteArray, highlight: StitchStep, hint: Positio
 	_hint = hint
 	_thread_end = thread_end
 	_new_thread = new_thread
+	_highlight_color = HIGHLIGHT_COLOR
+	_thread_start_color = THREAD_START_COLOR
+	if highlight != null:
+		var thread := _colors[highlight.thread]
+		_highlight_color = contrast_color(thread, HIGHLIGHT_COLOR, HIGHLIGHT_ALT_COLOR)
+		_thread_start_color = contrast_color(thread, THREAD_START_COLOR, THREAD_START_ALT_COLOR,
+				MARK_MIN_DELTA_E)
+	_thread_end_color = THREAD_END_COLOR
+	if thread_end.x >= 0:
+		_thread_end_color = contrast_color(_colors[pattern.get_cell(thread_end.x, thread_end.y)],
+				THREAD_END_COLOR, THREAD_END_ALT_COLOR, MARK_MIN_DELTA_E)
 	_scene.set_states(states)
 	_scene.set_ghost(highlight)
 	queue_redraw()
+
+
+## `main`, or `alternative` if that differs more from `thread` (CIEDE2000). With `enough`,
+## `main` stays whenever it differs at least that much.
+static func contrast_color(thread: Color, main: Color, alternative: Color, enough := INF) -> Color:
+	var lab := ColorLab.from_color(thread)
+	var main_delta := ColorLab.delta_e(lab, ColorLab.from_color(main))
+	if main_delta < enough and ColorLab.delta_e(lab, ColorLab.from_color(alternative)) > main_delta:
+		return alternative
+	return main
 
 
 ## Shows nothing (no project open).
@@ -290,6 +328,8 @@ func ensure_visible(step: StitchStep, hint: PositionHint = null, extra := Vector
 		rect = rect.merge(_cell_rect(hint.reference.x, hint.reference.y))
 	if extra.x >= 0:
 		rect = rect.merge(_cell_rect(extra.x, extra.y))
+	# Room for the badges beside the step and the path.
+	rect = rect.grow(_badge_gap() + _badge_radius("00") * 2.0)
 	var view := _free_rect().grow(-FIT_MARGIN)
 	if view.encloses(rect):
 		return
@@ -355,6 +395,7 @@ func _draw() -> void:
 		return
 	_update_scene()
 	draw_texture_rect(_viewport.get_texture(), Rect2(Vector2.ZERO, size), false)
+	_taken.clear()
 	if _flipping or _states.is_empty():
 		return
 	if back_side:
@@ -398,7 +439,7 @@ func _draw_back() -> void:
 	for hole in _back_ends:
 		draw_circle(_hole_point(hole), knot, THREAD_END_COLOR)
 	if _highlight != null:
-		draw_circle(_needle_start(_highlight), maxf(3.0, _cell_px * 0.15), HIGHLIGHT_COLOR)
+		draw_circle(_needle_start(_highlight), maxf(3.0, _cell_px * 0.15), _highlight_color)
 	if _thread_end.x >= 0:
 		_draw_thread_end(_thread_end)
 	if _highlight != null and _new_thread:
@@ -407,34 +448,95 @@ func _draw_back() -> void:
 		_draw_block_count(_highlight)
 
 
-## The current step (its legs still to stitch are see-through in 3D): a frame around its cells
-## and a dot where the needle comes up first.
+## The current step (its legs still to stitch are see-through in 3D): a frame around its cells,
+## a dot where the needle comes up first and an arrow along every leg, from where the needle
+## comes up to where it goes down.
 func _draw_highlight(step: StitchStep) -> void:
 	_draw_frame(step)
-	draw_circle(_needle_start(step), maxf(3.0, _cell_px * 0.15), HIGHLIGHT_COLOR)
+	_draw_leg_arrows(step)
+	draw_circle(_needle_start(step), maxf(3.0, _cell_px * 0.15), _highlight_color)
 
 
 func _draw_frame(step: StitchStep) -> void:
 	var rect := _step_rect(step).grow(maxf(2.0, _cell_px * 0.1))
-	draw_rect(rect, Color(HIGHLIGHT_COLOR, 0.12))
-	draw_rect(rect, HIGHLIGHT_COLOR, false, 3.0)
+	draw_rect(rect, Color(_highlight_color, 0.12))
+	draw_rect(rect, _highlight_color, false, 3.0)
 
 
-## How many stitches the current step has, in a badge just past the end the needle moves
-## towards (right of a single cross), so it stays clear of the start dot. Drawn last and at a
-## readable size even when cells are small.
+## A thin arrow along each leg of `step` (StitchStyle.needle_holes()), kept off the holes, on a
+## light edge so it reads over dark thread too. Left out when cells are small.
+func _draw_leg_arrows(step: StitchStep) -> void:
+	if _cell_px < MIN_ARROW_CELL_PX:
+		return
+	var holes := style.needle_holes(step)
+	var width := maxf(1.5, _cell_px * 0.045)
+	var head := _cell_px * 0.16
+	for i in range(0, holes.size() - 1, 2):
+		var up := _hole_point(holes[i])
+		var down := _hole_point(holes[i + 1])
+		var direction := (down - up).normalized()
+		var from := up.lerp(down, 0.2)
+		var tip := up.lerp(down, 0.78)
+		var back := tip - direction * head
+		var side := direction.orthogonal() * head * 0.55
+		var arrow := PackedVector2Array([tip, back + side, back - side])
+		var edge := Color(FABRIC_COLOR, 0.75)
+		draw_line(from, back, edge, width + 2.0)
+		draw_colored_polygon(_grown_triangle(arrow, 2.0), edge)
+		draw_line(from, back, _highlight_color, width)
+		draw_colored_polygon(arrow, _highlight_color)
+
+
+## `triangle` grown by `pixels` away from its centre, for an outline.
+static func _grown_triangle(triangle: PackedVector2Array, pixels: float) -> PackedVector2Array:
+	var center := (triangle[0] + triangle[1] + triangle[2]) / 3.0
+	var grown := PackedVector2Array()
+	for point in triangle:
+		grown.append(point + (point - center).normalized() * pixels)
+	return grown
+
+
+## How many stitches the current step has, in a badge a little past the end the needle moves
+## towards (right of a single cross), so it stays clear of the start dot and the thread next to
+## the step. Drawn last and at a readable size even when cells are small.
 func _draw_block_count(step: StitchStep) -> void:
 	var rect := _step_rect(step).grow(maxf(2.0, _cell_px * 0.1))
-	var font := get_theme_default_font()
-	var font_size := clampi(int(_cell_px * 0.55), 12, 22)
 	var text := str(step.cells.size())
-	var text_size := font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size)
-	var radius := maxf(text_size.x, font.get_height(font_size)) * 0.5 + 3.0
-	var offset := radius + 4.0
-	var towards_left := (step.direction < 0) != back_side
+	var offset := _badge_radius(text) + _badge_gap()
+	var towards_left := _block_count_left(step)
 	var center := Vector2(rect.position.x - offset if towards_left else rect.end.x + offset,
 			rect.get_center().y)
-	draw_circle(center, radius, HIGHLIGHT_COLOR)
+	_draw_badge(center, text, _highlight_color)
+
+
+## Whether the block count sits left of `step` on screen.
+func _block_count_left(step: StitchStep) -> bool:
+	return (step.direction < 0) != back_side
+
+
+## Space between a badge and what it belongs to.
+func _badge_gap() -> float:
+	return maxf(10.0, _cell_px * 0.6)
+
+
+func _badge_font_size() -> int:
+	return clampi(int(_cell_px * 0.55), 12, 22)
+
+
+func _badge_radius(text: String) -> float:
+	var font := get_theme_default_font()
+	var text_size := font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, _badge_font_size())
+	return maxf(text_size.x, font.get_height(_badge_font_size())) * 0.5 + 3.0
+
+
+## A number in white on a disc of `color`, as for the block count.
+func _draw_badge(center: Vector2, text: String, color: Color) -> void:
+	var font := get_theme_default_font()
+	var font_size := _badge_font_size()
+	var text_size := font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size)
+	var radius := _badge_radius(text)
+	_taken.append(Rect2(center - Vector2.ONE * radius, Vector2.ONE * radius * 2.0))
+	draw_circle(center, radius, color)
 	draw_string(font, center + Vector2(-text_size.x / 2.0, font.get_ascent(font_size) - font.get_height(font_size) / 2.0),
 			text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, Color.WHITE)
 
@@ -446,8 +548,11 @@ func _draw_hint(hint: PositionHint) -> void:
 	var reference := _cell_rect(hint.reference.x, hint.reference.y)
 	var line_width := maxf(2.0, _cell_px * 0.08)
 	draw_arc(reference.get_center(), _cell_px * 0.62, 0.0, TAU, 32, HINT_COLOR, line_width)
+	_taken.append(reference)
 	if hint.path.is_empty():
 		return
+	for cell in hint.path:
+		_taken.append(_cell_rect(cell.x, cell.y))
 	var corners: Array[Vector2i] = [hint.reference]
 	var corner := hint.corner()
 	if corner != hint.reference and corner != hint.target:
@@ -486,6 +591,30 @@ func _draw_hint(hint: PositionHint) -> void:
 		var baseline := center + Vector2(-text_size.x / 2.0, -text_size.y / 2.0 + font.get_ascent(font_size))
 		draw_circle(center, _cell_px * 0.3, Color(FABRIC_COLOR, 0.85))
 		draw_string(font, baseline, text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, color)
+	_draw_leg_totals(corners)
+
+
+## The count of each counting leg once more, big as the block count, beside the cell where the
+## leg ends, clear of the step's row: a first leg up or down goes on past its end, a first leg
+## left or right gets it on the side away from the next leg; the last leg (ending at the step)
+## left or right has it on the side away from where counting began, up or down away from the
+## block count.
+func _draw_leg_totals(corners: Array[Vector2i]) -> void:
+	for i in range(1, corners.size()):
+		var leg := corners[i] - corners[i - 1]
+		var start := _cell_rect(corners[i - 1].x, corners[i - 1].y).get_center()
+		var end := _cell_rect(corners[i].x, corners[i].y).get_center()
+		var side := Vector2.UP
+		if i + 1 < corners.size():
+			var next := _cell_rect(corners[i + 1].x, corners[i + 1].y).get_center()
+			side = (end - start if leg.x == 0 else end - next).normalized()
+		elif leg.x == 0:
+			side = Vector2.RIGHT if _highlight != null and _block_count_left(_highlight) else Vector2.LEFT
+		elif corners[0].y < corners[i].y:
+			side = Vector2.DOWN
+		var text := str(maxi(absi(leg.x), absi(leg.y)))
+		_draw_badge(end + side * (_cell_px * 0.5 + _badge_gap() + _badge_radius(text)), text,
+				_leg_color(leg))
 
 
 ## Colour of a counting leg going along `offset`: one for left/right, one for up/down.
@@ -493,38 +622,52 @@ func _leg_color(offset: Vector2i) -> Color:
 	return HINT_VERTICAL_COLOR if offset.x == 0 else HINT_COLOR
 
 
-## The old thread ends here: a red ring with a knot across the last stitch, labelled
-## "vernähen".
+## The old thread ends here: a red ring (dark for reddish threads) with a knot across the last
+## stitch, labelled "vernähen" well above it.
 func _draw_thread_end(cell: Vector2i) -> void:
 	var center := _cell_rect(cell.x, cell.y).get_center()
 	var radius := maxf(4.0, _cell_px * 0.55)
 	var width := maxf(2.0, _cell_px * 0.1)
-	draw_arc(center, radius, 0.0, TAU, 32, THREAD_END_COLOR, width)
-	draw_line(center - Vector2(radius, radius) * 0.6, center + Vector2(radius, radius) * 0.6, THREAD_END_COLOR, width)
-	_draw_label(center + Vector2(0.0, -radius - 4.0), "vernähen", THREAD_END_COLOR)
+	draw_arc(center, radius, 0.0, TAU, 32, _thread_end_color, width)
+	draw_line(center - Vector2(radius, radius) * 0.6, center + Vector2(radius, radius) * 0.6, _thread_end_color, width)
+	_draw_label(center, radius, -1.0, "vernähen", _thread_end_color)
 
 
-## A new thread starts with this step: a green ring around the needle's first hole, labelled
-## "neuer Faden".
+## A new thread starts with this step: a green ring (pink for greenish threads) around the
+## needle's first hole, labelled "neuer Faden" well below it.
 func _draw_thread_start(step: StitchStep) -> void:
 	var start := _needle_start(step)
 	var radius := maxf(5.0, _cell_px * 0.35)
-	draw_arc(start, radius, 0.0, TAU, 32, THREAD_START_COLOR, maxf(2.0, _cell_px * 0.1))
-	_draw_label(start + Vector2(0.0, radius + 4.0 + _label_size() * 0.8), "neuer Faden", THREAD_START_COLOR)
+	draw_arc(start, radius, 0.0, TAU, 32, _thread_start_color, maxf(2.0, _cell_px * 0.1))
+	_draw_label(start, radius, 1.0, "neuer Faden", _thread_start_color)
 
 
-## A short label centred at `position` (its baseline), on a light background so it reads over
-## stitches. Left out when cells are too small.
-func _draw_label(position: Vector2, text: String, color: Color) -> void:
+## A short label for the mark at `center` (a ring of `radius`): above it (`vertical` -1) or below
+## (1), a good cell away so it leaves the stitches around the mark free, joined to the ring by a
+## thin line; on a light background so it reads over stitches. It takes the other side when a
+## badge or label is in the way there. Left out when cells are too small.
+func _draw_label(center: Vector2, radius: float, vertical: float, text: String, color: Color) -> void:
 	if _cell_px < MIN_LABEL_CELL_PX:
 		return
 	var font := get_theme_default_font()
 	var font_size := _label_size()
 	var text_size := font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size)
-	var baseline := position - Vector2(text_size.x / 2.0, 0.0)
-	var box := Rect2(baseline + Vector2(-3.0, -font.get_ascent(font_size) - 1.0), text_size + Vector2(6.0, 2.0))
+	var gap := maxf(18.0, _cell_px * 1.1)
+	var box_height := font.get_height(font_size) + 2.0
+	var box := Rect2()
+	for side in [vertical, -vertical, vertical]:
+		vertical = side
+		var box_top := center.y + radius + gap if vertical > 0.0 else center.y - radius - gap - box_height
+		box = Rect2(center.x - text_size.x / 2.0 - 3.0, box_top, text_size.x + 6.0, box_height)
+		if not _taken.any(func(taken: Rect2) -> bool: return taken.intersects(box)):
+			break
+	_taken.append(box)
+	var line_end := box.position.y if vertical > 0.0 else box.end.y
+	draw_line(center + Vector2(0.0, radius * vertical), Vector2(center.x, line_end), color, maxf(1.5, _cell_px * 0.05))
 	draw_rect(box, Color(FABRIC_COLOR, 0.9))
-	draw_string(font, baseline, text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, color)
+	draw_rect(box, color, false, 1.5)
+	draw_string(font, Vector2(box.position.x + 3.0, box.position.y + 1.0 + font.get_ascent(font_size)),
+			text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, color)
 
 
 func _label_size() -> int:

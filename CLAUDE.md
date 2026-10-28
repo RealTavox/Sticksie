@@ -39,7 +39,13 @@ item is resolved during normal work, delete its entry in the same change.
   Compatibility renderer converts them itself), `ui/`
   views (`PatternView` draws `StitchScene` from a SubViewport and its 2D marks on top with the
   same grid-to-screen mapping; preview mode shows every cell as a finished cross, progress mode
-  the stitched legs and the current block's stitch count; `set_back_side(…, true)` animates the
+  the stitched legs, the current block with an arrow along every leg (up hole to down hole) and
+  its stitch count in a badge, the counting path with small numbers plus each leg's total in a
+  badge like the block count, and the thread labels a cell away with a leader line, moved to the
+  other side when a badge or the path is in the way; the block colour is orange or the button
+  blue, whichever differs more from the thread (`contrast_color()`, CIEDE2000), the thread
+  start/end marks switch to their second colour only when the first is closer than
+  `MARK_MIN_DELTA_E`; `set_back_side(…, true)` animates the
   flip; gestures for touch and mouse: one or two fingers / right mouse drag pan, pinch / wheel
   zoom, tap = next (held back `DOUBLE_TAP_SECONDS` to rule out a double tap), double tap = back,
   two-finger double tap / double right click = new thread, swipe in from the right edge = flip,
