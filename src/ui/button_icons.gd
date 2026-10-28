@@ -1,10 +1,11 @@
 class_name ButtonIcons
 ## Symbols for RoundButton, drawn procedurally from distance functions into a greyscale mask
-## (white = symbol), which the button's shader also uses as a height map. Coordinates are in
+## (white = symbol), which the button's shader also uses as a height map; button_icon() draws the
+## same symbols white on transparent for ordinary buttons. Coordinates are in
 ## units of the button's disc: (0, 0) is its centre, 1 its rim, y points down. Each mask is
 ## made once and cached.
 
-enum Icon { MENU, TEXT, NEEDLE, SPOOL, PIN }
+enum Icon { MENU, TEXT, NEEDLE, SPOOL, PIN, IMAGE, FOLDER, PROJECTS, GEAR, PENCIL, TRASH, CLOSE, CHECK }
 
 const SIZE := 128
 
@@ -16,6 +17,25 @@ static func texture(icon: Icon, disc: float) -> ImageTexture:
 	var key := "%d/%f" % [icon, disc]
 	if not _cache.has(key):
 		_cache[key] = _render(icon, disc)
+	return _cache[key]
+
+
+## `icon` white on transparent for an ordinary Button, `px` pixels square. Drawn at three times
+## that size and scaled down smoothly (icon_max_width), so it stays sharp on dense screens.
+static func button_icon(icon: Icon, px: int) -> ImageTexture:
+	var key := "button/%d/%d" % [icon, px]
+	if _cache.has(key):
+		return _cache[key]
+	var side := px * 3
+	var image := Image.create_empty(side, side, false, Image.FORMAT_RGBA8)
+	# The square spans -0.5..0.5; symbols reach about 0.45 from the centre.
+	var pixel := 1.0 / side
+	for y in side:
+		for x in side:
+			var p := Vector2(x + 0.5, y + 0.5) / side - Vector2(0.5, 0.5)
+			image.set_pixel(x, y, Color(1, 1, 1, clampf(0.5 - distance(icon, p) / pixel, 0.0, 1.0)))
+	image.generate_mipmaps()
+	_cache[key] = ImageTexture.create_from_image(image)
 	return _cache[key]
 
 
@@ -137,6 +157,49 @@ static func distance(icon: Icon, p: Vector2) -> float:
 			d = minf(d, _box(q, Vector2(0.0, -0.14), Vector2(0.1, 0.2), 0.03))
 			d = minf(d, _capsule(q, Vector2(-0.24, 0.07), Vector2(0.24, 0.07), 0.06))
 			return minf(d, _tapered(q, Vector2(0.0, 0.5), Vector2(0.0, 0.07), 0.01, 0.035))
+		Icon.IMAGE:
+			# A framed picture: two hills under a sun.
+			var frame := absf(_box(p, Vector2.ZERO, Vector2(0.44, 0.36), 0.07)) - 0.04
+			var hills := minf(_triangle(p, Vector2(-0.32, 0.26), Vector2(-0.08, -0.06), Vector2(0.16, 0.26)),
+					_triangle(p, Vector2(0.0, 0.26), Vector2(0.17, 0.04), Vector2(0.34, 0.26)))
+			var sun := (p - Vector2(0.17, -0.14)).length() - 0.07
+			return minf(frame, minf(hills, sun))
+		Icon.FOLDER:
+			# A folder with a tab on the left.
+			return minf(_box(p, Vector2(0.0, 0.07), Vector2(0.42, 0.27), 0.06),
+					_box(p, Vector2(-0.2, -0.2), Vector2(0.2, 0.08), 0.05))
+		Icon.PROJECTS:
+			# Four tiles, like a collection of pictures.
+			var d := INF
+			for center in [Vector2(-0.2, -0.2), Vector2(0.2, -0.2), Vector2(-0.2, 0.2), Vector2(0.2, 0.2)]:
+				d = minf(d, _box(p, center, Vector2(0.15, 0.15), 0.05))
+			return d
+		Icon.GEAR:
+			# A cog with eight teeth and a hole.
+			var d := p.length() - 0.29
+			for i in 8:
+				var q := p.rotated(-i * TAU / 8.0)
+				d = minf(d, _box(q, Vector2(0.0, -0.34), Vector2(0.075, 0.09), 0.02))
+			return maxf(d, 0.11 - p.length())
+		Icon.PENCIL:
+			# A pencil leaning right, its point at the bottom left, the eraser set off by a gap.
+			var q := p.rotated(deg_to_rad(-45.0))
+			var body := _box(q, Vector2(0.0, -0.08), Vector2(0.1, 0.3), 0.03)
+			body = maxf(body, 0.025 - absf(q.y + 0.2))
+			return minf(body, _triangle(q, Vector2(-0.1, 0.25), Vector2(0.1, 0.25), Vector2(0.0, 0.44)))
+		Icon.TRASH:
+			# A bin with a lid and handle, three slots in it.
+			var d := _box(p, Vector2(0.0, 0.12), Vector2(0.26, 0.28), 0.06)
+			for x in [-0.11, 0.0, 0.11]:
+				d = maxf(d, -_capsule(p, Vector2(x, -0.02), Vector2(x, 0.26), 0.032))
+			d = minf(d, _capsule(p, Vector2(-0.34, -0.25), Vector2(0.34, -0.25), 0.045))
+			return minf(d, _capsule(p, Vector2(-0.08, -0.34), Vector2(0.08, -0.34), 0.045))
+		Icon.CLOSE:
+			return minf(_capsule(p, Vector2(-0.28, -0.28), Vector2(0.28, 0.28), 0.06),
+					_capsule(p, Vector2(-0.28, 0.28), Vector2(0.28, -0.28), 0.06))
+		Icon.CHECK:
+			return minf(_capsule(p, Vector2(-0.32, 0.02), Vector2(-0.1, 0.24), 0.065),
+					_capsule(p, Vector2(-0.1, 0.24), Vector2(0.34, -0.26), 0.065))
 	return INF
 
 
@@ -154,6 +217,23 @@ static func _tapered(p: Vector2, a: Vector2, b: Vector2, radius_a: float, radius
 static func _box(p: Vector2, center: Vector2, half: Vector2, radius: float) -> float:
 	var q := (p - center).abs() - half + Vector2.ONE * radius
 	return q.max(Vector2.ZERO).length() + minf(maxf(q.x, q.y), 0.0) - radius
+
+
+## A filled triangle with corners `a`, `b` and `c`.
+static func _triangle(p: Vector2, a: Vector2, b: Vector2, c: Vector2) -> float:
+	var e0 := b - a
+	var e1 := c - b
+	var e2 := a - c
+	var v0 := p - a
+	var v1 := p - b
+	var v2 := p - c
+	var q0 := v0 - e0 * clampf(v0.dot(e0) / e0.dot(e0), 0.0, 1.0)
+	var q1 := v1 - e1 * clampf(v1.dot(e1) / e1.dot(e1), 0.0, 1.0)
+	var q2 := v2 - e2 * clampf(v2.dot(e2) / e2.dot(e2), 0.0, 1.0)
+	var s := signf(e0.cross(e2))
+	var d := Vector2(q0.dot(q0), s * v0.cross(e0)).min(Vector2(q1.dot(q1), s * v1.cross(e1))).min(
+			Vector2(q2.dot(q2), s * v2.cross(e2)))
+	return -sqrt(d.x) * signf(d.y)
 
 
 ## A quadratic Bézier curve from `a` over `control` to `b`, `radius` thick.

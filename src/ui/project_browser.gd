@@ -1,14 +1,14 @@
 class_name ProjectBrowser
-extends AcceptDialog
+extends OverlayWindow
 ## Lists the saved projects with a preview picture each, to open, rename or delete them.
 ## Deleting asks first, since it can't be undone. Renaming and deleting happen here; the signals
-## let the start screen follow when it concerns the open project.
+## let the start screen follow when it concerns the open project. The questions come up as
+## smaller windows of the same look on top.
 
 signal open_requested(path: String)
 signal project_renamed(path: String, new_name: String)
 signal project_deleted(path: String)
 
-const BUTTON_HEIGHT := 48.0
 const PREVIEW_SIZE := Vector2(96, 96)
 
 ## Path of the project open on the start screen, marked in the list.
@@ -17,26 +17,22 @@ var current_path := ""
 var _list: VBoxContainer
 var _empty_label: Label
 var _status_label: Label
-var _rename_dialog: ConfirmationDialog
+var _rename_window: OverlayWindow
 var _rename_edit: LineEdit
-var _delete_dialog: ConfirmationDialog
-## Project the rename or delete dialog is about.
+var _rename_button: Button
+var _delete_window: OverlayWindow
+var _delete_label: Label
+## Project the rename or delete window is about.
 var _target := {}
 
 
 func _init() -> void:
-	title = "Projekte"
-	ok_button_text = "Schließen"
-	var content := VBoxContainer.new()
-	add_child(content)
-	var scroll := ScrollContainer.new()
-	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	content.add_child(scroll)
+	super("Projekte")
+	fill_height = true
 	_list = VBoxContainer.new()
 	_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_list.add_theme_constant_override("separation", 8)
-	scroll.add_child(_list)
+	content.add_child(_list)
 	_empty_label = Label.new()
 	_empty_label.text = "Noch keine Projekte. Öffne ein Bild, dann wird es hier gespeichert."
 	_empty_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -45,33 +41,34 @@ func _init() -> void:
 	_status_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	content.add_child(_status_label)
 
-	_rename_dialog = ConfirmationDialog.new()
-	_rename_dialog.title = "Umbenennen"
-	_rename_dialog.ok_button_text = "Umbenennen"
-	_rename_dialog.cancel_button_text = "Abbrechen"
+	_rename_window = OverlayWindow.new("Umbenennen")
+	_rename_window.max_width = 420.0
 	_rename_edit = LineEdit.new()
-	_rename_edit.custom_minimum_size = Vector2(320, BUTTON_HEIGHT)
+	_rename_edit.custom_minimum_size.y = BUTTON_HEIGHT
 	_rename_edit.text_changed.connect(
-			func(text: String) -> void: _rename_dialog.get_ok_button().disabled = text.strip_edges().is_empty())
-	_rename_dialog.add_child(_rename_edit)
-	_rename_dialog.register_text_enter(_rename_edit)
-	_rename_dialog.confirmed.connect(_rename)
-	add_child(_rename_dialog)
+			func(text: String) -> void: _rename_button.disabled = text.strip_edges().is_empty())
+	_rename_edit.text_submitted.connect(func(_text: String) -> void: _rename())
+	_rename_window.content.add_child(_rename_edit)
+	_rename_window.buttons.add_child(make_button("Abbrechen", ButtonIcons.Icon.CLOSE, _rename_window.close))
+	_rename_button = make_button("Umbenennen", ButtonIcons.Icon.PENCIL, _rename)
+	_rename_window.buttons.add_child(_rename_button)
+	add_child(_rename_window)
 
-	_delete_dialog = ConfirmationDialog.new()
-	_delete_dialog.title = "Endgültig löschen?"
-	_delete_dialog.ok_button_text = "Endgültig löschen"
-	_delete_dialog.cancel_button_text = "Abbrechen"
-	_delete_dialog.dialog_autowrap = true
-	_delete_dialog.confirmed.connect(_delete)
-	add_child(_delete_dialog)
+	_delete_window = OverlayWindow.new("Endgültig löschen?")
+	_delete_window.max_width = 420.0
+	_delete_label = Label.new()
+	_delete_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_delete_window.content.add_child(_delete_label)
+	_delete_window.buttons.add_child(make_button("Abbrechen", ButtonIcons.Icon.CLOSE, _delete_window.close))
+	_delete_window.buttons.add_child(make_button("Endgültig löschen", ButtonIcons.Icon.TRASH, _delete))
+	add_child(_delete_window)
 
 
-## Fills the list from the saved files and shows the dialog.
+## Fills the list from the saved files and opens the window.
 func open() -> void:
 	_status_label.text = ""
 	_fill()
-	popup_centered_ratio(0.9)
+	super()
 
 
 func _fill() -> void:
@@ -110,36 +107,31 @@ func _make_row(entry: Dictionary) -> Control:
 	info_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	info_label.modulate.a = 0.7
 	column.add_child(info_label)
-	var buttons := HBoxContainer.new()
-	column.add_child(buttons)
-	buttons.add_child(_make_button("Öffnen", func() -> void:
-		hide()
+	var row_buttons := HFlowContainer.new()
+	column.add_child(row_buttons)
+	row_buttons.add_child(make_button("Öffnen", ButtonIcons.Icon.FOLDER, func() -> void:
+		close()
 		open_requested.emit(entry.path)))
-	buttons.add_child(_make_button("Umbenennen", _ask_rename.bind(entry)))
-	buttons.add_child(_make_button("Löschen", _ask_delete.bind(entry)))
+	row_buttons.add_child(make_button("Umbenennen", ButtonIcons.Icon.PENCIL, _ask_rename.bind(entry)))
+	row_buttons.add_child(make_button("Löschen", ButtonIcons.Icon.TRASH, _ask_delete.bind(entry)))
 	return row
-
-
-func _make_button(text: String, on_pressed: Callable) -> Button:
-	var button := Button.new()
-	button.text = text
-	button.custom_minimum_size = Vector2(96, BUTTON_HEIGHT)
-	button.focus_mode = Control.FOCUS_NONE
-	button.pressed.connect(on_pressed)
-	return button
 
 
 func _ask_rename(entry: Dictionary) -> void:
 	_target = entry
 	_rename_edit.text = entry.name
-	_rename_dialog.get_ok_button().disabled = false
-	_rename_dialog.popup_centered()
+	_rename_button.disabled = false
+	_rename_window.safe_area = safe_area
+	_rename_window.open()
 	_rename_edit.grab_focus()
 	_rename_edit.select_all()
 
 
 func _rename() -> void:
 	var new_name := _rename_edit.text.strip_edges()
+	if new_name.is_empty():
+		return
+	_rename_window.close()
 	var error := ProjectStore.rename(_target.path, new_name)
 	if error != OK:
 		_status_label.text = "Umbenennen fehlgeschlagen: %s" % error_string(error)
@@ -150,12 +142,14 @@ func _rename() -> void:
 
 func _ask_delete(entry: Dictionary) -> void:
 	_target = entry
-	_delete_dialog.dialog_text = ("„%s“ wird mit dem ganzen Stickfortschritt gelöscht.\n"
+	_delete_label.text = ("„%s“ wird mit dem ganzen Stickfortschritt gelöscht. "
 			+ "Das lässt sich nicht rückgängig machen.") % entry.name
-	_delete_dialog.popup_centered(Vector2(400, 0))
+	_delete_window.safe_area = safe_area
+	_delete_window.open()
 
 
 func _delete() -> void:
+	_delete_window.close()
 	var error := ProjectStore.delete(_target.path)
 	if error != OK:
 		_status_label.text = "Löschen fehlgeschlagen: %s" % error_string(error)

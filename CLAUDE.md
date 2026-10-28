@@ -54,9 +54,16 @@ item is resolved during normal work, delete its entry in the same change.
   from the left edge = overview; `set_covered()` keeps steps clear of overlays), `StitchPanel`
   step guidance (texts in `info`, buttons in `controls`, so the touch layout can split them),
   `RoundButton` the round see-through touch buttons (lit by `round_button.gdshader` from the
-  same light as the fabric, `tint_color` when on: the block colour while stitching, blue in the overview, symbols from `ButtonIcons` distance functions, tooltip on long press), `ProjectBrowser` the
+  same light as the fabric, `tint_color` when on: the block colour while stitching, blue in the overview, symbols from `ButtonIcons` distance functions, tooltip on long press; `ButtonIcons.button_icon()`
+  draws the same symbols white for ordinary buttons: menu, windows, project list),
+  `OverlayWindow` the in-app windows in the overlays' look (dark rounded panel, title with a close
+  button, scrolling content, buttons at the bottom, over a dimmed screen that takes all input and
+  keys; slides up and fades in, back down and out; the settings, the project list and its rename
+  and delete questions are ones; opening the file dialog, the project list or the settings closes
+  the open touch overlays, menu included, and `main.gd` `_restore_overlays()` opens them again when
+  it closes), `ProjectBrowser` the
   project list: open, rename, delete after a confirmation; the preview comes from
-  `ProjectStore.preview()`, for now the source image, later meant to show the progress), `main.tscn`/`main.gd` the start screen: two layouts
+  `ProjectStore.preview()`, for now the source image, later meant to show the progress), `main.tscn`/`main.gd` the start screen (the sample image opens from the advanced settings): two layouts
   built from the same widgets, moved by `_apply_ui_mode()`: desktop (toolbar, side panel) and
   touch (view on the whole screen, round buttons for the menu top left, which closes itself on
   the next touch of the view unless pinned, the colour list / stitching buttons bottom left, the

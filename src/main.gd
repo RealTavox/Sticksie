@@ -70,7 +70,6 @@ const ROUND_BUTTON_PX := 72.0
 const PIN_BUTTON_PX := 52.0
 const TOUCH_MARGIN := 12.0
 const OVERLAY_MAX_WIDTH := 480.0
-const OVERLAY_COLOR := Color(0.13, 0.12, 0.11, 0.84)
 ## Opening a touch overlay: it slides in this far (the menu from above, the others from below)
 ## while fading in; closing goes the same way back, faster.
 const MENU_SLIDE_PX := 16.0
@@ -111,12 +110,12 @@ var _overlay_moving := {}
 var _menu_home := Vector2.ZERO
 
 var _open_button: Button
-var _sample_button: Button
 var _projects_button: Button
 var _project_browser: ProjectBrowser
-var _settings_dialog: AcceptDialog
-## Holds the settings, scrolling when they are taller than the screen allows.
-var _settings_scroll: ScrollContainer
+var _settings_dialog: OverlayWindow
+## Touch overlays closed while the file dialog, the project list or the settings are open, as
+## [panel, button] pairs; they open again when it closes.
+var _hidden_overlays: Array[Array] = []
 var _limit_box: CheckBox
 var _corner_option: OptionButton
 var _limit_spin: SpinBox
@@ -207,17 +206,19 @@ func _build_ui() -> void:
 	_file_dialog.access = FileDialog.ACCESS_FILESYSTEM
 	_file_dialog.filters = PackedStringArray(["*.png ; PNG-Bilder"])
 	_file_dialog.use_native_dialog = true
-	_file_dialog.file_selected.connect(_open_image)
+	_file_dialog.file_selected.connect(func(path: String) -> void:
+		_restore_overlays()
+		_open_image(path))
+	_file_dialog.canceled.connect(_restore_overlays)
 	add_child(_file_dialog)
 
+	# These open a window, which closes the menu itself (and opens it again afterwards).
 	_toolbar = HFlowContainer.new()
-	_open_button = _make_toolbar_button("Bild öffnen…", _file_dialog.popup_centered_ratio.bind(0.8))
+	_open_button = _make_toolbar_button("Bild öffnen…", _show_open_image, ButtonIcons.Icon.IMAGE, false)
 	_toolbar.add_child(_open_button)
-	_sample_button = _make_toolbar_button("Beispiel", _open_image.bind(SAMPLE_PATH))
-	_toolbar.add_child(_sample_button)
-	_projects_button = _make_toolbar_button("Projekte", _show_projects)
+	_projects_button = _make_toolbar_button("Projekte", _show_projects, ButtonIcons.Icon.PROJECTS, false)
 	_toolbar.add_child(_projects_button)
-	_toolbar.add_child(_make_toolbar_button("Einstellungen", _show_settings))
+	_toolbar.add_child(_make_toolbar_button("Einstellungen", _show_settings, ButtonIcons.Icon.GEAR, false))
 	_overview_button = _make_toolbar_button("◂ Übersicht", _leave_stitching)
 	_overview_button.visible = false
 	_toolbar.add_child(_overview_button)
@@ -283,6 +284,7 @@ func _build_ui() -> void:
 	_project_browser.open_requested.connect(_open_project)
 	_project_browser.project_renamed.connect(_on_project_renamed)
 	_project_browser.project_deleted.connect(_on_project_deleted)
+	_project_browser.closed.connect(_restore_overlays)
 	add_child(_project_browser)
 
 
@@ -352,11 +354,7 @@ func _build_touch_shell() -> void:
 
 func _make_overlay_panel() -> PanelContainer:
 	var panel := PanelContainer.new()
-	var style := StyleBoxFlat.new()
-	style.bg_color = OVERLAY_COLOR
-	style.set_corner_radius_all(16)
-	style.set_content_margin_all(12)
-	panel.add_theme_stylebox_override("panel", style)
+	panel.add_theme_stylebox_override("panel", OverlayWindow.panel_style())
 	panel.visible = false
 	panel.visibility_changed.connect(func() -> void: _update_cover.call_deferred())
 	return panel
@@ -461,6 +459,31 @@ func _close_menu_unless_pinned() -> bool:
 	return true
 
 
+## Closes every open touch overlay, the menu too, for a window (file dialog, project list,
+## settings); _restore_overlays() opens them again.
+func _hide_overlays() -> void:
+	if not _touch:
+		return
+	for entry: Array in [[_menu_panel, _menu_button], [_list_panel, _list_button], [_text_panel, _text_button]]:
+		var button: RoundButton = entry[1]
+		if button.button_pressed and not _hidden_overlays.has(entry):
+			_hidden_overlays.append(entry)
+			_set_overlay(entry[0], button, false)
+
+
+func _restore_overlays() -> void:
+	for entry in _hidden_overlays:
+		_set_overlay(entry[0], entry[1], true)
+	_hidden_overlays.clear()
+
+
+## Opens `window` in the safe area, with the touch overlays out of the way.
+func _open_window(window: OverlayWindow) -> void:
+	_hide_overlays()
+	window.safe_area = _safe if _touch else Vector4.ZERO
+	window.open()
+
+
 ## Moves the shared widgets into the desktop or the touch layout (Preferences.touch_mode()).
 func _apply_ui_mode() -> void:
 	_close_picker_now()
@@ -509,7 +532,6 @@ static func _place(node: Node, parent: Node, index := -1) -> void:
 func _update_visibility() -> void:
 	var stitching := _stitch_thread >= 0
 	_open_button.visible = not stitching
-	_sample_button.visible = not stitching
 	_projects_button.visible = not stitching
 	_overview_button.visible = stitching
 	_side_button.visible = stitching
@@ -600,20 +622,21 @@ func _loop_light(on: bool) -> void:
 	_light_tween.tween_callback(func() -> void: _light_spin = 0.0)
 
 
+## The settings window. Übernehmen stores them; closing it any other way leaves them as they
+## were and puts the saved light back (the sliders show theirs right away).
 func _build_settings_dialog() -> void:
-	_settings_dialog = AcceptDialog.new()
-	_settings_dialog.title = "Einstellungen"
-	_settings_dialog.ok_button_text = "Übernehmen"
-	_settings_dialog.add_cancel_button("Abbrechen")
-	_settings_dialog.confirmed.connect(_apply_settings)
-	_settings_dialog.canceled.connect(_restore_light)
+	_settings_dialog = OverlayWindow.new("Einstellungen")
+	_settings_dialog.buttons.add_child(OverlayWindow.make_button("Abbrechen", ButtonIcons.Icon.CLOSE,
+			_settings_dialog.close))
+	_settings_dialog.buttons.add_child(OverlayWindow.make_button("Übernehmen", ButtonIcons.Icon.CHECK,
+			func() -> void:
+				_apply_settings()
+				_settings_dialog.close()))
+	_settings_dialog.closed.connect(func() -> void:
+		_restore_light()
+		_restore_overlays())
 	add_child(_settings_dialog)
-	_settings_scroll = ScrollContainer.new()
-	_settings_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	_settings_dialog.add_child(_settings_scroll)
-	var content := VBoxContainer.new()
-	content.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_settings_scroll.add_child(content)
+	var content := _settings_dialog.content
 	var ui_label := Label.new()
 	ui_label.text = "Bedienung:"
 	content.add_child(ui_label)
@@ -628,6 +651,7 @@ func _build_settings_dialog() -> void:
 	content.add_child(_method_option)
 	_whole_back_box = CheckBox.new()
 	_whole_back_box.text = "Dänisch: Rückweg in einem Zug bis zur nächsten Lücke (statt in Blöcken)"
+	_whole_back_box.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	content.add_child(_whole_back_box)
 	var block_row := HBoxContainer.new()
 	content.add_child(block_row)
@@ -647,16 +671,14 @@ func _build_settings_dialog() -> void:
 	content.add_child(corner_label)
 	_corner_option = _make_option(START_CORNERS.map(func(corner: Array) -> String: return corner[0]))
 	content.add_child(_corner_option)
-	var corner_note := Label.new()
-	corner_note.text = ("Fläche für Fläche: Die Ecke bestimmt, wo es losgeht und welcher Abschnitt\n"
-			+ "bei gleichem Abstand zuerst kommt. Eine Reihe beginnt trotzdem am näheren Ende,\n"
-			+ "wenn der Faden dort schon ist. Automatisch probiert jede Farbe in allen vier Ecken\n"
-			+ "und nimmt die, bei der am wenigsten Faden hinten weiterläuft oder neu nötig ist.")
-	corner_note.modulate.a = 0.7
-	content.add_child(corner_note)
+	content.add_child(_make_note("Fläche für Fläche: Die Ecke bestimmt, wo es losgeht und welcher Abschnitt "
+			+ "bei gleichem Abstand zuerst kommt. Eine Reihe beginnt trotzdem am näheren Ende, "
+			+ "wenn der Faden dort schon ist. Automatisch probiert jede Farbe in allen vier Ecken "
+			+ "und nimmt die, bei der am wenigsten Faden hinten weiterläuft oder neu nötig ist."))
 	content.add_child(HSeparator.new())
 	_limit_box = CheckBox.new()
 	_limit_box.text = "Faden automatisch wechseln, wenn er auf der Rückseite mehr als"
+	_limit_box.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	content.add_child(_limit_box)
 	var row := HBoxContainer.new()
 	content.add_child(row)
@@ -668,18 +690,16 @@ func _build_settings_dialog() -> void:
 	var unit := Label.new()
 	unit.text = "Felder überspringen müsste."
 	row.add_child(unit)
-	var note := Label.new()
-	note.text = ("Aus: Der Faden wird nie automatisch gewechselt, er darf beliebig weit springen.\n"
-			+ "Üblich sind 2–3 Felder: längere Fäden auf der Rückseite verhaken sich und scheinen durch.\n"
-			+ "Einen neuen Faden kannst du beim Sticken jederzeit selbst nehmen.")
-	note.modulate.a = 0.7
-	content.add_child(note)
+	content.add_child(_make_note("Aus: Der Faden wird nie automatisch gewechselt, er darf beliebig weit springen. "
+			+ "Üblich sind 2–3 Felder: längere Fäden auf der Rückseite verhaken sich und scheinen durch. "
+			+ "Einen neuen Faden kannst du beim Sticken jederzeit selbst nehmen."))
 	_limit_box.toggled.connect(func(on: bool) -> void: _limit_spin.editable = on)
 	content.add_child(HSeparator.new())
 	_build_advanced_settings(content)
 
 
-## The advanced part, closed at first so the dialog stays short: how each cross is worked.
+## The advanced part, closed at first so the window stays short: how each cross is worked, the
+## light, and the sample image.
 func _build_advanced_settings(content: VBoxContainer) -> void:
 	_advanced_button = Button.new()
 	_advanced_button.toggle_mode = true
@@ -690,9 +710,7 @@ func _build_advanced_settings(content: VBoxContainer) -> void:
 	content.add_child(_advanced_button)
 	_advanced_box = VBoxContainer.new()
 	content.add_child(_advanced_box)
-	var needle_label := Label.new()
-	needle_label.text = "Stichführung (welcher Schenkel zuerst, wo die Nadel hochkommt):"
-	_advanced_box.add_child(needle_label)
+	_advanced_box.add_child(_make_note("Stichführung (welcher Schenkel zuerst, wo die Nadel hochkommt):", 1.0))
 	_needle_option = _make_option(NEEDLE_MODES)
 	_needle_option.item_selected.connect(func(_index: int) -> void: _update_needle_options())
 	_advanced_box.add_child(_needle_option)
@@ -700,40 +718,39 @@ func _build_advanced_settings(content: VBoxContainer) -> void:
 	_advanced_box.add_child(_leg_option)
 	_needle_start_option = _make_option(NEEDLE_STARTS)
 	_advanced_box.add_child(_needle_start_option)
-	var note := Label.new()
-	note.text = ("Automatisch: erst /, dann \\. Die Nadel kommt immer so hoch, dass auf der Rückseite\n"
-			+ "nur kurze senkrechte Stiche bleiben, in beide Richtungen.\n"
-			+ "Fest: jeder Schenkel genau so, wie gewählt. Auf der Rückseite kann der Faden dann\n"
-			+ "schräg über zwei Felder laufen. Nicht mitten im Projekt wechseln, sonst liegen die\n"
-			+ "oberen Schenkel nicht mehr gleich.")
-	note.modulate.a = 0.7
-	_advanced_box.add_child(note)
+	_advanced_box.add_child(_make_note("Automatisch: erst /, dann \\. Die Nadel kommt immer so hoch, dass auf der "
+			+ "Rückseite nur kurze senkrechte Stiche bleiben, in beide Richtungen. "
+			+ "Fest: jeder Schenkel genau so, wie gewählt. Auf der Rückseite kann der Faden dann "
+			+ "schräg über zwei Felder laufen. Nicht mitten im Projekt wechseln, sonst liegen die "
+			+ "oberen Schenkel nicht mehr gleich."))
 	_advanced_box.add_child(HSeparator.new())
 	_advanced_box.add_child(_make_light_row())
-	var light_note := Label.new()
-	light_note.text = ("Richtung im Uhrzeigersinn von oben (315 = oben links) und Höhe über dem Stoff\n"
-			+ "(90 = genau von oben). Nach jedem Schritt kreist das Licht einmal auf einem Oval.")
-	light_note.modulate.a = 0.7
-	_advanced_box.add_child(light_note)
+	_advanced_box.add_child(_make_note("Richtung im Uhrzeigersinn von oben (315 = oben links) und Höhe über "
+			+ "dem Stoff (90 = genau von oben). Nach jedem Schritt kreist das Licht einmal auf einem Oval."))
+	_advanced_box.add_child(HSeparator.new())
+	# Opening the sample leaves the settings unchanged, like Abbrechen.
+	var sample_button := OverlayWindow.make_button("Beispielbild öffnen", ButtonIcons.Icon.IMAGE, func() -> void:
+		_settings_dialog.close()
+		_open_image(SAMPLE_PATH))
+	sample_button.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+	_advanced_box.add_child(sample_button)
+	_advanced_box.add_child(_make_note("Ein kleines Muster zum Ausprobieren, als neues Projekt."))
 	_show_advanced(false)
+
+
+## A wrapped explanation in the settings, faded to `alpha`.
+static func _make_note(text: String, alpha := 0.7) -> Label:
+	var note := Label.new()
+	note.text = text
+	note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	note.modulate.a = alpha
+	return note
 
 
 func _show_advanced(open: bool) -> void:
 	_advanced_button.set_pressed_no_signal(open)
 	_advanced_button.text = ("▾ " if open else "▸ ") + "Erweitert"
 	_advanced_box.visible = open
-	_fit_settings()
-
-
-## Sizes the settings to their content, at most as tall as fits on screen (they scroll then).
-func _fit_settings() -> void:
-	var content: Control = _settings_scroll.get_child(0)
-	var wanted := content.get_combined_minimum_size()
-	var room := get_viewport_rect().size.y - 140.0
-	_settings_scroll.custom_minimum_size = Vector2(wanted.x, minf(wanted.y, room))
-	_settings_dialog.reset_size()
-	if _settings_dialog.visible:
-		_settings_dialog.move_to_center()
 
 
 ## Leg order and needle start only count for a fixed style.
@@ -746,20 +763,22 @@ func _update_needle_options() -> void:
 func _make_option(items: Array) -> OptionButton:
 	var option := OptionButton.new()
 	option.custom_minimum_size.y = BUTTON_HEIGHT
+	# Long choices are cut short on narrow screens; the list shows them whole.
+	option.fit_to_longest_item = false
+	option.clip_text = true
+	option.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	for item: String in items:
 		option.add_item(item)
 	return option
 
 
-func _make_toolbar_button(text: String, on_pressed: Callable) -> Button:
-	var button := Button.new()
-	button.text = text
-	button.custom_minimum_size.y = BUTTON_HEIGHT
-	button.focus_mode = Control.FOCUS_NONE
-	button.pressed.connect(func() -> void:
-		_close_menu_unless_pinned()
+## A toolbar button with an optional symbol (ButtonIcons.Icon, -1 for none); pressing it closes
+## the menu unless pinned, if `closes_menu`.
+func _make_toolbar_button(text: String, on_pressed: Callable, icon := -1, closes_menu := true) -> Button:
+	return OverlayWindow.make_button(text, icon, func() -> void:
+		if closes_menu:
+			_close_menu_unless_pinned()
 		on_pressed.call())
-	return button
 
 
 func _update_layout() -> void:
@@ -913,6 +932,12 @@ func _open_image(path: String) -> void:
 	_save()
 
 
+## The file dialog for a new image, with the touch overlays out of the way until it closes.
+func _show_open_image() -> void:
+	_hide_overlays()
+	_file_dialog.popup_centered_ratio(0.8)
+
+
 func _show_settings() -> void:
 	_ui_option.selected = 0 if Preferences.touch_mode() else 1
 	var limit := Preferences.max_skip()
@@ -930,8 +955,7 @@ func _show_settings() -> void:
 	_leg_option.selected = 0 if Preferences.slash_first() else 1
 	_needle_start_option.selected = 1 if Preferences.needle_from_top() else 0
 	_update_needle_options()
-	_fit_settings()
-	_settings_dialog.popup_centered()
+	_open_window(_settings_dialog)
 
 
 ## Index into START_CORNERS of a row order and start side, or of the automatic choice.
@@ -1033,7 +1057,7 @@ func _show_info() -> void:
 
 func _show_projects() -> void:
 	_project_browser.current_path = _project.path if _project != null else ""
-	_project_browser.open()
+	_open_window(_project_browser)
 
 
 ## The project list renamed a file; the open project takes the name, or its next save would
@@ -1331,7 +1355,7 @@ func _on_finale_chosen(choice: Finale.Choice) -> void:
 			_open_overview_panels()
 			_view.fit_to_view()
 		Finale.Choice.NEW_PROJECT:
-			_file_dialog.popup_centered_ratio(0.8)
+			_show_open_image()
 		Finale.Choice.OPEN_PROJECT:
 			_show_projects()
 
@@ -1628,7 +1652,8 @@ func _handle_cmdline() -> void:
 		_show_finale()
 	if screenshot_path.is_empty():
 		return
-	while not _overlay_moving.is_empty() or _view.is_panning():
+	while (not _overlay_moving.is_empty() or _view.is_panning() or _settings_dialog.is_animating()
+			or _project_browser.is_animating()):
 		await get_tree().process_frame
 	if _view.is_flipping() and flip < 0.0:
 		await _view.flip_finished
