@@ -25,7 +25,8 @@ item is resolved during normal work, delete its entry in the same change.
   stitch style; not saved in the project file, pushed into the open project; plus the touch or
   desktop layout in section `ui`, default touch on mobile, and which touch panels are open while
   stitching, closed until opened, then as left, and whether the symbol window shows, default on,
-  switched in the advanced settings; developer mode in section `dev`, only honoured in
+  switched in the advanced settings, as still pictures (the last frames) or animated, and how
+  fast; developer mode in section `dev`, only honoured in
   debug builds); `palette/` thread colours and Lab matching, `pattern/` the `Pattern`
   resource, `import/` PNG → pattern, `planner/` Danish stitch order (`StitchPlanner` →
   `StitchStep`s), `stitching/` progress per thread (`StitchSession`), the back of the fabric
@@ -153,7 +154,7 @@ How to check a change; every fix and feature runs these. Godot binary:
    --steps=<n>` for the stitching screen after n confirmed steps, `--max-skip=<n>` to set the
    skip limit (-1: none), `--start=<auto|top-left|top-right|bottom-left|bottom-right>` the start corner, `--settings` to open the settings dialog, `--projects` the project list, `--back` the back side while stitching,
    `--method=<danish|english>`, `--back-pass=<whole|blocks>`, `--max-block=<n>`, `--needle=<auto|bottom|top>`, `--first-leg=<slash|backslash>`
-   (both fix the style), `--advanced` / `--dev-tools` with `--settings` for the advanced part / developer tools, `--dev=<on|off>` the developer mode (saved), `--symbols=<on|off>` the symbol window (saved) or
+   (both fix the style), `--advanced` / `--dev-tools` with `--settings` for the advanced part / developer tools, `--dev=<on|off>` the developer mode (saved), `--symbols=<on|off|still|animated>` the symbol window or its still pictures (saved) or
    `--symbols=<secure|thread|anchor|count|stitch>[,<0..1>]` to hold that card at that point of its animation, `--ui=<touch|desktop>` the layout,
    `--overlays=<menu,pin,list,text>` opens touch overlays, `--picker=<code>` the colour picker
    for a colour of the list, `--picker-view=<list,project>` its list view and/or project filter, `--pick=<code>` chooses a colour in it, `--tooltip=<menu|list|text>` shows a

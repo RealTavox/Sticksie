@@ -29,6 +29,17 @@ const FONT_SIZE := 22
 const GAP_COLOR := Color(0.13, 0.12, 0.11)
 const NEEDLE_TEXTURE_PX := 512
 
+## Show every card's last frame at once instead of playing the animations (switching it on
+## ends a running animation there too).
+var still := false:
+	set(value):
+		still = value
+		if still and not _held:
+			_time = _start(_cards.size())
+			_update_views()
+## How much faster than normal the animations play.
+var speed := 1.0
+
 var _cards: Array[Card] = []
 var _views: Array[CardView] = []
 ## Seconds since the cards began; they have all played once after the sum of their times.
@@ -94,7 +105,7 @@ func show_step(step: StitchStep, hint: PositionHint, style: StitchStyle, new_thr
 		_views.append(view)
 	custom_minimum_size = Vector2(PADDING + maxi(_cards.size(), 1) * (CARD + PADDING), SIDE)
 	size = custom_minimum_size
-	_time = 0.0
+	_time = _start(_cards.size()) if still else 0.0
 	_held = false
 	_update_views()
 	queue_redraw()
@@ -126,7 +137,7 @@ func _process(delta: float) -> void:
 	var total := _start(_cards.size())
 	if _cards.is_empty() or _held or _time >= total or not is_visible_in_tree():
 		return
-	_time = minf(_time + delta, total)
+	_time = minf(_time + delta * speed, total)
 	_since_draw += delta
 	if _since_draw >= 1.0 / FRAMES_PER_SECOND or _time >= total:
 		_since_draw = 0.0

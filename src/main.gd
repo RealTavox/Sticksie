@@ -56,6 +56,8 @@ const NEEDLE_MODES := [
 	"Automatisch: so, dass die Rückseite am saubersten wird (empfohlen)",
 	"Fest: Reihenfolge und Richtung selbst wählen",
 ]
+## Tempo of the symbol window's animations in the settings: label and speed factor.
+const SYMBOL_SPEEDS := [["Normal", 1.0], ["Schneller (1,5×)", 1.5], ["Schnell (2×)", 2.0], ["Sehr schnell (3×)", 3.0]]
 const LEG_ORDERS := ["Erst / dann \\", "Erst \\ dann /"]
 const NEEDLE_STARTS := ["Nadel immer unten hoch (Schenkel von unten nach oben)",
 		"Nadel immer oben hoch (Schenkel von oben nach unten)"]
@@ -135,6 +137,8 @@ var _dev_button: RoundButton
 ## and whether it has been put in place since it last appeared (then it glides when it moves).
 var _symbols: StepSymbols
 var _symbols_box: CheckBox
+var _symbols_still_box: CheckBox
+var _symbols_speed_option: OptionButton
 var _symbols_placed := false
 ## How far above the pattern's lower edge it was last put (the touch layout's buttons and panels).
 var _symbols_bottom := 0.0
@@ -306,6 +310,8 @@ func _build_ui() -> void:
 	_build_touch_shell()
 	# Above the pattern and the touch panels, below the windows.
 	_symbols = StepSymbols.new()
+	_symbols.still = Preferences.step_symbols_still()
+	_symbols.speed = Preferences.step_symbols_speed()
 	_symbols.visible = false
 	add_child(_symbols)
 	_view.resized.connect(func() -> void:
@@ -762,6 +768,24 @@ func _build_advanced_settings(content: VBoxContainer) -> void:
 			+ "oberen Schenkel nicht mehr gleich."))
 	_advanced_box.add_child(HSeparator.new())
 	_advanced_box.add_child(_symbols_box)
+	_symbols_still_box = CheckBox.new()
+	_symbols_still_box.text = "Symbole als Standbild (gleich das fertige Bild, ohne Animation)"
+	_symbols_still_box.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_advanced_box.add_child(_symbols_still_box)
+	var speed_row := HBoxContainer.new()
+	var speed_label := Label.new()
+	speed_label.text = "Tempo der Animationen:"
+	speed_row.add_child(speed_label)
+	_symbols_speed_option = _make_option(SYMBOL_SPEEDS.map(func(speed: Array) -> String: return speed[0]))
+	_symbols_speed_option.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	speed_row.add_child(_symbols_speed_option)
+	_advanced_box.add_child(speed_row)
+	# Without the window, or as still pictures, the other symbol settings don't count.
+	var update_symbol_options := func(_on: bool) -> void:
+		_symbols_still_box.disabled = not _symbols_box.button_pressed
+		_symbols_speed_option.disabled = not _symbols_box.button_pressed or _symbols_still_box.button_pressed
+	_symbols_box.toggled.connect(update_symbol_options)
+	_symbols_still_box.toggled.connect(update_symbol_options)
 	_show_advanced(false)
 	var light_row := _make_light_row()
 	if OS.is_debug_build():
@@ -1099,6 +1123,11 @@ func _show_settings() -> void:
 	_method_option.selected = 1 if Preferences.english() else 0
 	_whole_back_box.button_pressed = Preferences.whole_back()
 	_symbols_box.button_pressed = Preferences.step_symbols()
+	_symbols_still_box.button_pressed = Preferences.step_symbols_still()
+	var speeds: Array = SYMBOL_SPEEDS.map(func(speed: Array) -> float: return speed[1])
+	_symbols_speed_option.selected = maxi(speeds.find(Preferences.step_symbols_speed()), 0)
+	_symbols_still_box.disabled = not _symbols_box.button_pressed
+	_symbols_speed_option.disabled = not _symbols_box.button_pressed or _symbols_still_box.button_pressed
 	_whole_back_box.disabled = Preferences.english()
 	_block_spin.value = Preferences.max_block()
 	_needle_option.selected = 1 if Preferences.needle_fixed() else 0
@@ -1133,6 +1162,10 @@ func _apply_settings() -> void:
 	Preferences.set_english(_method_option.selected == 1)
 	Preferences.set_whole_back(_whole_back_box.button_pressed)
 	Preferences.set_step_symbols(_symbols_box.button_pressed)
+	Preferences.set_step_symbols_still(_symbols_still_box.button_pressed)
+	Preferences.set_step_symbols_speed(SYMBOL_SPEEDS[_symbols_speed_option.selected][1])
+	_symbols.still = Preferences.step_symbols_still()
+	_symbols.speed = Preferences.step_symbols_speed()
 	_update_symbols()
 	Preferences.set_max_block(int(_block_spin.value))
 	Preferences.set_stitch_style(_needle_option.selected == 1, _leg_option.selected == 0,
@@ -1739,6 +1772,9 @@ func _handle_cmdline() -> void:
 			var symbols := arg.trim_prefix("--symbols=").split(",")
 			if symbols[0] in ["on", "off"]:
 				Preferences.set_step_symbols(symbols[0] == "on")
+			elif symbols[0] in ["still", "animated"]:
+				Preferences.set_step_symbols_still(symbols[0] == "still")
+				_symbols.still = symbols[0] == "still"
 			else:
 				symbols_card = symbols
 		elif arg == "--back":

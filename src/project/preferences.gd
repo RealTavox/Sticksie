@@ -113,6 +113,24 @@ static func set_step_symbols(value: bool) -> void:
 	_store("step_symbols", value, "ui")
 
 
+## Whether the symbol window shows its cards' last frames at once instead of animating them.
+static func step_symbols_still() -> bool:
+	return bool(_load().get_value("ui", "step_symbols_still", false))
+
+
+static func set_step_symbols_still(value: bool) -> void:
+	_store("step_symbols_still", value, "ui")
+
+
+## How much faster than normal the symbol window's animations play (1 = normal).
+static func step_symbols_speed() -> float:
+	return float(_load().get_value("ui", "step_symbols_speed", 1.0))
+
+
+static func set_step_symbols_speed(value: float) -> void:
+	_store("step_symbols_speed", value, "ui")
+
+
 ## Whether the screen is laid out for touch (a full-screen view with round buttons that open
 ## overlays) instead of the desktop layout with toolbar and side panel. Defaults to touch on
 ## phones and tablets.
