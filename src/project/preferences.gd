@@ -148,6 +148,16 @@ static func set_touch_mode(value: bool) -> void:
 	_store("touch", value, "ui")
 
 
+## How much bigger than normal everything on screen is drawn (1 = as designed): text, buttons,
+## windows and the pattern alike.
+static func ui_scale() -> float:
+	return float(_load().get_value("ui", "scale", 1.0))
+
+
+static func set_ui_scale(value: float) -> void:
+	_store("scale", value, "ui")
+
+
 ## Which touch panels are open while stitching: the stitching buttons' and the texts'. Closed
 ## until the user opens them; each stays as it was left for the next time.
 static func stitch_list_open() -> bool:

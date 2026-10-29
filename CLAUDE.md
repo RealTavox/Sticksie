@@ -24,7 +24,9 @@ item is resolved during normal work, delete its entry in the same change.
   developer tools; skip limit, start corner or automatic, stitch method, block size, the
   stitch style; not saved in the project file, pushed into the open project; plus the touch or
   desktop layout in section `ui`, default touch on phones and tablets, also in their browser
-  (features `web_ios`, `web_android`), and which touch panels are open while
+  (features `web_ios`, `web_android`), the UI-Skalierung (`ui_scale()`, the root window's
+  `content_scale_factor`, 100–175 %: at 200 % the windows no longer fit a phone's 720 canvas
+  pixels), and which touch panels are open while
   stitching, closed until opened, then as left, and whether the symbol window shows, default on,
   switched in the settings, as still pictures (the last frames) or animated, and how
   fast; developer mode in section `dev`, only honoured in
@@ -70,7 +72,8 @@ item is resolved during normal work, delete its entry in the same change.
   `RoundButton` the round see-through touch buttons (lit by `round_button.gdshader` from the
   same light as the fabric, `tint_color` when on: the block colour while stitching, blue in the overview, symbols from `ButtonIcons` distance functions, tooltip on long press; `ButtonIcons.button_icon()`
   draws the same symbols white for ordinary buttons: menu, windows, project list, stitching buttons),
-  the settings window (`main.gd` `_build_settings_dialog()`): sections Bedienung, Symbolfenster
+  the settings window (`main.gd` `_build_settings_dialog()`): sections Bedienung, UI-Skalierung
+  (shows at once like the light, Abbrechen puts it back), Symbolfenster
   (while on, a `StepSymbols.show_preview()` plays every card at the chosen tempo, a tap replays
   one), Stichmethode, Anfangen in der Ecke, Stickführung, Fadenwechsel, then the developer tools;
   two-sided choices (layout, method) are `ChoiceCards`, big buttons side by side with a picture
@@ -173,7 +176,7 @@ How to check a change; every fix and feature runs these. Godot binary:
    skip limit (-1: none), `--start=<auto|top-left|top-right|bottom-left|bottom-right>` the start corner, `--settings` to open the settings dialog, `--projects` the project list, `--back` the back side while stitching,
    `--method=<danish|english>`, `--back-pass=<whole|blocks>`, `--max-block=<n>`, `--needle=<auto|bottom|top>`, `--first-leg=<slash|backslash>`
    (both fix the style), `--dev-tools` with `--settings` for the developer tools, `--scroll=<px>` scrolls the open window (settings, project list) that far down before the screenshot, `--dev=<on|off>` the developer mode (saved), `--symbols=<on|off|still|animated>` the symbol window or its still pictures (saved) or
-   `--symbols=<secure|thread|anchor|count|stitch>[,<0..1>]` to hold that card at that point of its animation, `--ui=<touch|desktop>` the layout,
+   `--symbols=<secure|thread|anchor|count|stitch>[,<0..1>]` to hold that card at that point of its animation, `--ui=<touch|desktop>` the layout, `--ui-scale=<factor>` the UI-Skalierung (saved),
    `--overlays=<menu,pin,list,text>` opens touch overlays, `--picker=<code>` the colour picker
    for a colour of the list, `--picker-view=<list,project>` its list view and/or project filter, `--pick=<code>` chooses a colour in it, `--tooltip=<menu|list|text>` shows a
    round button's tooltip, `--safe-area=<l>,<t>,<r>,<b>` fakes a notch or island (canvas px), `--finish` stitches the rest of the `--stitch` colour (the celebration comes in), `--dismiss` taps it away to the overview, `--finale` shows the finished-project show, `--wait=<seconds>` waits that long before the screenshot (e.g. into the bar's fill; otherwise screenshots wait for the fill), `--zoom=<cell px>`

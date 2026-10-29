@@ -12,7 +12,7 @@ extends Control
 ## `--first-leg=<slash|backslash>` the stitch style (bottom/top/first-leg fix it), `--projects` the project list, `--stitch=<code>` starts stitching that thread, `--steps=<n>` confirms n steps, `--back` shows the back while stitching, `--screenshot=<png path>` saves a screenshot after a few
 ## frames and quits (`--wait=<seconds>` waits that much longer, e.g. into an animation).
 ## `--finish` stitches the rest of the `--stitch` colour (the celebration comes in),
-## `--dismiss` then taps it away to the overview. `--finale` shows the show for a finished project. `--ui=<touch|desktop>` sets the layout, `--overlays=<menu,pin,list,text>`
+## `--dismiss` then taps it away to the overview. `--finale` shows the show for a finished project. `--ui=<touch|desktop>` sets the layout, `--ui-scale=<factor>` the UI-Skalierung (both saved), `--overlays=<menu,pin,list,text>`
 ## opens touch overlays (pin: the menu pinned), `--tooltip=<menu|list|text>` shows a round
 ## button's tooltip, `--safe-area=<left>,<top>,<right>,<bottom>` pretends the screen has a notch
 ## or island (canvas pixels), `--picker=<code>` opens the colour picker for that colour of the
@@ -58,6 +58,9 @@ const NEEDLE_MODES := [
 ]
 ## Tempo of the symbol window's animations in the settings: label and speed factor.
 const SYMBOL_SPEEDS := [["Normal", 1.0], ["Schneller (1,5×)", 1.5], ["Schnell (2×)", 2.0], ["Sehr schnell (3×)", 3.0]]
+## UI-Skalierung in the settings: label and factor (Preferences.ui_scale()). Phones in portrait
+## are 720 canvas pixels wide at 100 %; at 175 % (411) the windows still fit, at 200 % they don't.
+const UI_SCALES := [["100 % (normal)", 1.0], ["125 %", 1.25], ["150 %", 1.5], ["175 %", 1.75]]
 const LEG_ORDERS := ["Erst / dann \\", "Erst \\ dann /"]
 const NEEDLE_STARTS := ["Nadel immer unten hoch (Schenkel von unten nach oben)",
 		"Nadel immer oben hoch (Schenkel von oben nach unten)"]
@@ -172,6 +175,7 @@ var _menu_button: RoundButton
 var _list_button: RoundButton
 var _text_button: RoundButton
 var _ui_cards: ChoiceCards
+var _ui_scale_option: OptionButton
 var _view: PatternView
 var _light_azimuth: HSlider
 var _light_elevation: HSlider
@@ -218,6 +222,7 @@ func _ready() -> void:
 			ProjectStore.directory = arg.trim_prefix("--projects-dir=")
 		opens_image = opens_image or arg.begins_with("--open=")
 	_palette = FlossPalette.dmc()
+	_apply_ui_scale(Preferences.ui_scale())
 	_build_ui()
 	resized.connect(_update_layout)
 	_apply_ui_mode()
@@ -646,6 +651,17 @@ func _restore_light() -> void:
 	_apply_light()
 
 
+## Draws everything `factor` times as big as designed (UI-Skalierung). The overview fits the
+## pattern to the screen's new size; while stitching the view keeps its zoom.
+func _apply_ui_scale(factor: float) -> void:
+	if is_equal_approx(get_window().content_scale_factor, factor):
+		return
+	get_window().content_scale_factor = factor
+	if _project != null and _stitch_thread < 0:
+		await get_tree().process_frame
+		_view.fit_to_view()
+
+
 ## Swings the light once around the fabric (unless it is going round anyway).
 func _spin_light() -> void:
 	if _light_looping:
@@ -677,7 +693,7 @@ func _loop_light(on: bool) -> void:
 
 
 ## The settings window. Übernehmen stores them; closing it any other way leaves them as they
-## were and puts the saved light back (the sliders show theirs right away). Choices with two
+## were and puts the saved light and UI-Skalierung back (both show right away). Choices with two
 ## sides are big picture cards (ChoiceCards); the other settings show a picture of what they do
 ## under them (SettingPicture), and the symbol window's settings play all its cards.
 func _build_settings_dialog() -> void:
@@ -690,6 +706,7 @@ func _build_settings_dialog() -> void:
 				_settings_dialog.close())))
 	_settings_dialog.closed.connect(func() -> void:
 		_restore_light()
+		_apply_ui_scale(Preferences.ui_scale())
 		_restore_overlays())
 	add_child(_settings_dialog)
 	var content := _settings_dialog.content
@@ -698,6 +715,13 @@ func _build_settings_dialog() -> void:
 	_ui_cards = ChoiceCards.new([["Touch", SettingPicture.Kind.TOUCH],
 			["Maus + Tastatur", SettingPicture.Kind.MOUSE_KEYBOARD]])
 	content.add_child(_ui_cards)
+	content.add_child(HSeparator.new())
+	content.add_child(_make_heading("UI-Skalierung"))
+	_ui_scale_option = _make_option(UI_SCALES.map(func(choice: Array) -> String: return choice[0]))
+	_ui_scale_option.item_selected.connect(func(index: int) -> void: _apply_ui_scale(UI_SCALES[index][1]))
+	content.add_child(_ui_scale_option)
+	content.add_child(_make_note("Macht Schrift, Knöpfe, Fenster und Muster größer. Wirkt sofort, "
+			+ "Abbrechen nimmt es zurück."))
 	content.add_child(HSeparator.new())
 	_build_symbol_settings(content)
 	content.add_child(HSeparator.new())
@@ -1230,6 +1254,8 @@ func _show_open_image() -> void:
 
 func _show_settings() -> void:
 	_ui_cards.selected = 0 if Preferences.touch_mode() else 1
+	var scales: Array = UI_SCALES.map(func(choice: Array) -> float: return choice[1])
+	_ui_scale_option.selected = maxi(scales.find(Preferences.ui_scale()), 0)
 	var limit := Preferences.max_skip()
 	_limit_box.button_pressed = limit != StitchPlanner.UNLIMITED
 	_limit_spin.editable = _limit_box.button_pressed
@@ -1274,6 +1300,7 @@ func _apply_settings() -> void:
 	if (_ui_cards.selected == 0) != Preferences.touch_mode():
 		Preferences.set_touch_mode(_ui_cards.selected == 0)
 		_apply_ui_mode()
+	Preferences.set_ui_scale(UI_SCALES[_ui_scale_option.selected][1])
 	var limit := int(_limit_spin.value) if _limit_box.button_pressed else StitchPlanner.UNLIMITED
 	Preferences.set_max_skip(limit)
 	var corner: Array = START_CORNERS[_corner_option.selected]
@@ -1935,6 +1962,9 @@ func _handle_cmdline() -> void:
 		elif arg.begins_with("--ui="):
 			Preferences.set_touch_mode(arg.trim_prefix("--ui=") == "touch")
 			_apply_ui_mode()
+		elif arg.begins_with("--ui-scale="):
+			Preferences.set_ui_scale(arg.trim_prefix("--ui-scale=").to_float())
+			_apply_ui_scale(Preferences.ui_scale())
 		elif arg.begins_with("--picker="):
 			picker_code = arg.trim_prefix("--picker=")
 		elif arg.begins_with("--picker-view="):
