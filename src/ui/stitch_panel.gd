@@ -11,7 +11,9 @@ signal new_thread_toggled
 
 const BUTTON_HEIGHT := 64.0
 const STEP_FONT_SIZE := 24
-const DESKTOP_HINT := "Weiter: Knopf, Tippen aufs Muster oder Leertaste · Zurück: Doppeltippen"
+const DESKTOP_HINT := ("Klick aufs Muster oder Leertaste: weiter · Doppelklick, Rücktaste oder Entf: zurück · "
+		+ "Enter oder rechts doppelklicken: neuer Faden\nTab: Rückseite · Q: Übersicht · Mausrad oder + / −: "
+		+ "zoomen · rechte Maustaste ziehen, WASD oder Pfeiltasten: verschieben")
 const TOUCH_HINT := ("Tippen: weiter · Doppeltippen: zurück · mit zwei Fingern doppeltippen: neuer Faden\n"
 		+ "Vom rechten Rand wischen: Rückseite · vom linken Rand: Übersicht")
 
@@ -81,7 +83,7 @@ func _init() -> void:
 	controls.add_child(_hint_label)
 
 
-## Names the touch gestures in the hint instead of the keys.
+## Names the touch gestures in the hint instead of the keys and clicks.
 func set_touch(touch: bool) -> void:
 	_hint_label.text = TOUCH_HINT if touch else DESKTOP_HINT
 

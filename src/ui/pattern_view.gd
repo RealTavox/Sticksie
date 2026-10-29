@@ -1016,6 +1016,18 @@ func _on_tap(position: Vector2) -> void:
 			tapped.emit())
 
 
+## Zooms by `factor` around the middle of the part the overlays leave free (the + and − keys).
+func zoom_by(factor: float) -> void:
+	if not _flipping:
+		_zoom_at(_free_rect().get_center(), factor)
+
+
+## Moves the pattern by `delta` (the arrow and WASD keys).
+func pan_by(delta: Vector2) -> void:
+	if not _flipping:
+		_pan(delta)
+
+
 func _pan(delta: Vector2) -> void:
 	_stop_pan()
 	_origin += delta

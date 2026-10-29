@@ -14,6 +14,7 @@ extends Control
 ## return pass, `--max-block=<n>` the most stitches per block, `--needle=<auto|bottom|top>` and
 ## `--first-leg=<slash|backslash>` the stitch style (bottom/top/first-leg fix it), `--projects` the project list, `--stitch=<code>` starts stitching that thread, `--steps=<n>` confirms n steps, `--back` shows the back while stitching, `--screenshot=<png path>` saves a screenshot after a few
 ## frames and quits (`--wait=<seconds>` waits that much longer, e.g. into an animation).
+## `--keys=<key>[:<seconds>],…` presses keys one after the other (held that long), after the steps.
 ## `--finish` stitches the rest of the `--stitch` colour (the celebration comes in),
 ## `--dismiss` then taps it away to the overview. `--finale` shows the show for a finished project. `--ui=<touch|desktop>` sets the layout, `--ui-scale=<factor>` the UI-Skalierung (both saved), `--overlays=<menu,pin,list,text>`
 ## opens touch overlays (pin: the menu pinned), `--tooltip=<menu|list|text>` shows a round
@@ -85,6 +86,18 @@ const OVERLAY_CLOSE_SECONDS := 0.12
 const PICKER_SWIPE_SECONDS := 0.35
 ## After a touch closed the menu, taps within this time only closed it.
 const CLOSE_SWALLOW_MSEC := 700
+## How fast held WASD or arrow keys move the view, in canvas pixels per second.
+const KEY_PAN_SPEED := 700.0
+## Zoom per press of + or −.
+const KEY_ZOOM := 1.25
+## Keys that move the view and the way it goes (the pattern moves the other way).
+const PAN_KEYS := {
+	KEY_W: Vector2.UP, KEY_UP: Vector2.UP, KEY_S: Vector2.DOWN, KEY_DOWN: Vector2.DOWN,
+	KEY_A: Vector2.LEFT, KEY_LEFT: Vector2.LEFT, KEY_D: Vector2.RIGHT, KEY_RIGHT: Vector2.RIGHT,
+}
+## The keys for zooming and moving, small under the colour list in the mouse-and-keyboard layout
+## (StitchPanel.DESKTOP_HINT names them all while stitching).
+const KEYS_HINT := "Mausrad oder + / −: zoomen · rechte Maustaste ziehen, WASD oder Pfeiltasten: verschieben"
 
 var _palette: FlossPalette
 var _project: StitchProject
@@ -160,14 +173,16 @@ var _needle_start_option: OptionButton
 var _overview_button: Button
 var _side_button: Button
 var _info_label: Label
+var _keys_hint: Label
+## Pan keys (PAN_KEYS) pressed on the screen and maybe still held; _process() moves the view.
+var _held_pan_keys := {}
 var _toolbar: HFlowContainer
-var _desktop_root: MarginContainer
-var _desktop_column: VBoxContainer
-var _body: BoxContainer
-var _touch_root: Control
+var _shell_root: Control
 var _menu_panel: PanelContainer
 var _menu_content: VBoxContainer
 var _menu_pin: RoundButton
+## Top of the bottom row: the round buttons and the bar (touch) or just the bar.
+var _bottom_row := 0.0
 var _dock: BoxContainer
 var _dock_spacer: Control
 var _list_panel: PanelContainer
@@ -226,6 +241,7 @@ func _ready() -> void:
 		if arg.begins_with("--projects-dir="):
 			ProjectStore.directory = arg.trim_prefix("--projects-dir=")
 		opens_image = opens_image or arg.begins_with("--open=")
+	set_process(false)  # Only while pan keys are held.
 	_palette = FlossPalette.dmc()
 	BrowserStorage.check()
 	_apply_ui_scale(Preferences.ui_scale())
@@ -269,8 +285,7 @@ func _build_ui() -> void:
 	_toolbar.add_child(_make_toolbar_button("Einstellungen", _show_settings, ButtonIcons.Icon.GEAR, false))
 	_info_label = Label.new()
 	_info_label.text = "Öffne ein Pixelart-Bild (PNG). Ein Pixel wird ein Kreuzstich."
-	_info_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_info_label.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	_info_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 
 	_view = PatternView.new()
 	_view.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -297,6 +312,12 @@ func _build_ui() -> void:
 	_color_list = VBoxContainer.new()
 	_color_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	scroll.add_child(_color_list)
+	_keys_hint = Label.new()
+	_keys_hint.text = KEYS_HINT
+	_keys_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_keys_hint.add_theme_font_size_override("font_size", 12)
+	_keys_hint.modulate.a = 0.6
+	_side.add_child(_keys_hint)
 	var credit := Label.new()
 	credit.text = CREDIT
 	credit.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -308,6 +329,9 @@ func _build_ui() -> void:
 	_list_host.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	_list_host.resized.connect(_fit_list_host)
 	_list_host.add_child(_side)
+	# Its wrapped labels first measure themselves at no width, a word a line, and only shrink
+	# once laid out; fit again then, or the list keeps that height and they end up out of sight.
+	_side.minimum_size_changed.connect(func() -> void: _fit_list_host.call_deferred())
 	_picker = ThreadPicker.new()
 	_picker.visible = false
 	_picker.confirmed.connect(_close_picker)
@@ -318,21 +342,18 @@ func _build_ui() -> void:
 	_progress.visible = false
 
 	_stitch_panel = StitchPanel.new()
-	_stitch_panel.visible = false
+	_stitch_panel.visible = false  # Only holds the signals; its texts and buttons go in the panels.
 	_stitch_panel.next_pressed.connect(_next_step)
 	_stitch_panel.previous_pressed.connect(_previous_step)
 	_stitch_panel.new_thread_toggled.connect(_toggle_new_thread)
-	_build_desktop_shell()
-	_build_touch_shell()
+	add_child(_stitch_panel)
+	_build_shell()
 	# Above the pattern and the touch panels, below the windows.
 	_symbols = StepSymbols.new()
 	_symbols.still = Preferences.step_symbols_still()
 	_symbols.speed = Preferences.step_symbols_speed()
 	_symbols.visible = false
 	add_child(_symbols)
-	_view.resized.connect(func() -> void:
-		if not _touch:
-			_place_symbols.call_deferred(0.0))
 	_build_settings_dialog()
 	_project_browser = ProjectBrowser.new()
 	_project_browser.open_requested.connect(_open_project)
@@ -344,38 +365,28 @@ func _build_ui() -> void:
 	add_child(_project_browser)
 
 
-## Toolbar on top, pattern and side panel below (beside each other in landscape); the widgets
-## are put in by _apply_ui_mode().
-func _build_desktop_shell() -> void:
-	_desktop_root = MarginContainer.new()
-	_desktop_root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	for side in ["left", "top", "right", "bottom"]:
-		_desktop_root.add_theme_constant_override("margin_" + side, 8)
-	add_child(_desktop_root)
-	_desktop_column = VBoxContainer.new()
-	_desktop_root.add_child(_desktop_column)
-	_body = BoxContainer.new()
-	_body.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	_desktop_column.add_child(_body)
-	_body.add_child(_stitch_panel)
-
-
-## The pattern on the whole screen, overlay panels and the three round buttons above it. Only
-## the panels and buttons take input; the rest goes through to the view.
-func _build_touch_shell() -> void:
-	_touch_root = Control.new()
-	_touch_root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	_touch_root.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	add_child(_touch_root)
+## The pattern on the whole screen, the progress bar and the overlay panels above it: the menu
+## (the toolbar), the texts and the colour list or stitching buttons; in the touch layout also
+## the three round buttons that open and close them. Only the panels and buttons take input; the
+## rest goes through to the view.
+func _build_shell() -> void:
+	_shell_root = Control.new()
+	_shell_root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_shell_root.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(_shell_root)
+	_shell_root.add_child(_view)
+	_view.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_shell_root.add_child(_progress)
 
 	_menu_panel = _make_overlay_panel()
 	_menu_panel.anchor_right = 1.0
-	_touch_root.add_child(_menu_panel)
+	_shell_root.add_child(_menu_panel)
 	var menu_row := HBoxContainer.new()
 	_menu_panel.add_child(menu_row)
 	_menu_content = VBoxContainer.new()
 	_menu_content.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	menu_row.add_child(_menu_content)
+	_menu_content.add_child(_toolbar)
 	_menu_pin = RoundButton.new(ButtonIcons.Icon.PIN, "Menü anheften: bleibt offen, auch wenn du das Muster bedienst",
 			PIN_BUTTON_PX)
 	_menu_pin.toggle_mode = true
@@ -389,11 +400,13 @@ func _build_touch_shell() -> void:
 	_dock.anchor_bottom = 1.0
 	_dock.grow_vertical = Control.GROW_DIRECTION_BEGIN
 	_dock.resized.connect(func() -> void: _update_cover.call_deferred())
-	_touch_root.add_child(_dock)
+	_shell_root.add_child(_dock)
 	_text_panel = _make_overlay_panel()
 	_dock.add_child(_text_panel)
 	_text_content = VBoxContainer.new()
 	_text_panel.add_child(_text_content)
+	_text_content.add_child(_info_label)
+	_place(_stitch_panel.info, _text_content)
 	_dock_spacer = Control.new()
 	_dock_spacer.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_dock_spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -402,13 +415,17 @@ func _build_touch_shell() -> void:
 	_dock.add_child(_list_panel)
 	_list_content = VBoxContainer.new()
 	_list_panel.add_child(_list_content)
+	_list_content.add_child(_list_host)
+	_place(_stitch_panel.controls, _list_content)
 
 	_menu_button = _make_round_button(ButtonIcons.Icon.MENU, "Menü: Neu, Projekte, Einstellungen", _menu_panel)
 	_list_button = _make_round_button(ButtonIcons.Icon.SPOOL, "", _list_panel)
 	_text_button = _make_round_button(ButtonIcons.Icon.TEXT, "", _text_panel)
 	_dev_button = RoundButton.new(ButtonIcons.Icon.WRENCH, "Entwicklermodus (noch ohne Funktion)", ROUND_BUTTON_PX)
 	_dev_button.toggle_mode = true
-	_touch_root.add_child(_dev_button)
+	_shell_root.add_child(_dev_button)
+	# In the mouse-and-keyboard layout it sits under the menu, which may wrap to more rows.
+	_menu_panel.resized.connect(_place_dev_button)
 
 
 func _make_overlay_panel() -> PanelContainer:
@@ -427,7 +444,7 @@ func _make_round_button(icon: ButtonIcons.Icon, tooltip: String, panel: Control)
 		_set_overlay(panel, button, on)
 		if _stitch_thread >= 0 and panel != _menu_panel:
 			Preferences.set_stitch_panels(_list_button.button_pressed, _text_button.button_pressed))
-	_touch_root.add_child(button)
+	_shell_root.add_child(button)
 	return button
 
 
@@ -546,43 +563,31 @@ func _restore_overlays() -> void:
 ## Opens `window` in the safe area, with the touch overlays out of the way.
 func _open_window(window: OverlayWindow) -> void:
 	_hide_overlays()
-	window.safe_area = _safe if _touch else Vector4.ZERO
+	window.safe_area = _safe
 	window.open()
 
 
-## Moves the shared widgets into the desktop or the touch layout (Preferences.touch_mode()).
+## Switches between the touch layout and the one for mouse and keyboard
+## (Preferences.touch_mode()). Both show the same panels on the pattern; touch opens and closes
+## them with round buttons, mouse and keyboard has them always open, and its hints name keys and
+## clicks instead of gestures.
 func _apply_ui_mode() -> void:
 	_close_picker_now()
 	_touch = Preferences.touch_mode()
-	_desktop_root.visible = not _touch
-	_touch_root.visible = _touch
 	_stitch_panel.set_touch(_touch)
-	_info_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART if _touch else TextServer.AUTOWRAP_OFF
-	_info_label.text_overrun_behavior = (TextServer.OVERRUN_NO_TRIMMING if _touch
-			else TextServer.OVERRUN_TRIM_ELLIPSIS)
-	if _touch:
-		_place(_view, _touch_root, 0)
-		_view.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-		_place(_toolbar, _menu_content, 0)
-		_place(_info_label, _text_content, 0)
-		_place(_stitch_panel.info, _text_content, 1)
-		_place(_list_host, _list_content, 0)
-		_place(_stitch_panel.controls, _list_content, 1)
-		_place(_progress, _touch_root, 1)
-		_progress.custom_minimum_size = Vector2.ZERO
-		if _project == null:
-			_set_overlay(_menu_panel, _menu_button, true)
-	else:
-		_place(_toolbar, _desktop_column, 0)
-		_place(_info_label, _toolbar)
-		_place(_view, _body, 0)
-		_place(_list_host, _body, 1)
-		_place(_stitch_panel.info, _stitch_panel, 0)
-		_place(_stitch_panel.controls, _stitch_panel, 1)
-		_place(_progress, _desktop_column)
-		_progress.custom_minimum_size.y = PROGRESS_HEIGHT + _progress.margin * 2.0
+	_keys_hint.visible = not _touch
+	if not _touch:
+		_open_all_panels()
+	elif _project == null:
+		_set_overlay(_menu_panel, _menu_button, true)
 	_update_visibility()
 	_update_layout()
+
+
+## The panels of the mouse-and-keyboard layout, which has no buttons to open them.
+func _open_all_panels() -> void:
+	for entry: Array in [[_menu_panel, _menu_button], [_list_panel, _list_button], [_text_panel, _text_button]]:
+		_set_overlay(entry[0], entry[1], true, false)
 
 
 ## Makes `node` a child of `parent` at `index` (last if -1), moving it from where it was.
@@ -603,10 +608,9 @@ func _update_visibility() -> void:
 	_overview_button.visible = stitching
 	_side_button.visible = stitching
 	_list_host.visible = not stitching
-	_stitch_panel.visible = stitching and not _touch
-	_info_label.visible = not (stitching and _touch)
-	_stitch_panel.info.visible = stitching or not _touch
-	_stitch_panel.controls.visible = stitching or not _touch
+	_info_label.visible = not stitching
+	_stitch_panel.info.visible = stitching
+	_stitch_panel.controls.visible = stitching
 	if stitching:
 		_list_button.icon = ButtonIcons.Icon.NEEDLE
 		_list_button.tooltip = "Sticken: zurück, gestickt, neuer Faden"
@@ -1007,46 +1011,38 @@ func _make_toolbar_button(text: String, on_pressed: Callable, icon := -1, closes
 		on_pressed.call())
 
 
+## Everything inside the safe area: the menu at the top, the other panels above the bottom row,
+## stacked in portrait (texts on top), side by side in landscape. Touch: round buttons in three
+## corners, the menu right of its button and the bar between the bottom two. Mouse and keyboard:
+## no round buttons, the menu across the top and the bar along the whole bottom.
 func _update_layout() -> void:
-	if _touch:
-		_layout_touch()
-		return
-	_view.set_covered(_symbols_room(), 0.0)
-	_place_symbols.call_deferred(0.0)
-	# Portrait: pattern above the side panel; landscape: side panel on the right.
-	var portrait := size.y > size.x
-	_body.vertical = portrait
-	var side_size := Vector2(0.0, size.y * 0.38) if portrait else Vector2(minf(560.0, size.x * 0.4), 0.0)
-	_list_host.custom_minimum_size = side_size
-	_stitch_panel.custom_minimum_size = side_size
-
-
-## Round buttons in three corners inside the safe area; the menu right of its button, the
-## other panels above the bottom buttons: stacked in portrait (texts on top), side by side in
-## landscape.
-func _layout_touch() -> void:
 	_read_safe_area()
 	var portrait := size.y > size.x
 	var left := _safe.x + TOUCH_MARGIN
 	var right := size.x - _safe.z - TOUCH_MARGIN
-	var bottom_row := size.y - _safe.w - TOUCH_MARGIN - ROUND_BUTTON_PX
+	var bottom_row := size.y - _safe.w - TOUCH_MARGIN - (ROUND_BUTTON_PX if _touch else PROGRESS_HEIGHT)
+	_bottom_row = bottom_row
 	_menu_button.position = Vector2(left, _safe.y + TOUCH_MARGIN)
-	_dev_button.position = _menu_button.position + Vector2(0.0, ROUND_BUTTON_PX + TOUCH_MARGIN)
-	_dev_button.size = _dev_button.custom_minimum_size
-	_dev_button.visible = Preferences.developer_mode()
 	_list_button.position = Vector2(left, bottom_row)
 	_text_button.position = Vector2(right - ROUND_BUTTON_PX, bottom_row)
 	for button: Control in [_menu_button, _list_button, _text_button]:
 		button.size = button.custom_minimum_size
-	var bar_left := left + ROUND_BUTTON_PX + TOUCH_MARGIN
-	_progress.place_bar(Rect2(bar_left, bottom_row + (ROUND_BUTTON_PX - PROGRESS_HEIGHT) / 2.0,
-			maxf(right - ROUND_BUTTON_PX - TOUCH_MARGIN - bar_left, 0.0), PROGRESS_HEIGHT))
+		button.visible = _touch
+	# Pinning only means something where the menu closes itself.
+	_menu_pin.visible = _touch
+	if _touch:
+		var bar_left := left + ROUND_BUTTON_PX + TOUCH_MARGIN
+		_progress.place_bar(Rect2(bar_left, bottom_row + (ROUND_BUTTON_PX - PROGRESS_HEIGHT) / 2.0,
+				maxf(right - ROUND_BUTTON_PX - TOUCH_MARGIN - bar_left, 0.0), PROGRESS_HEIGHT))
+	else:
+		_progress.place_bar(Rect2(left, bottom_row, maxf(right - left, 0.0), PROGRESS_HEIGHT))
 
-	_menu_panel.offset_left = left + ROUND_BUTTON_PX + TOUCH_MARGIN * 0.5
+	_menu_panel.offset_left = left + ROUND_BUTTON_PX + TOUCH_MARGIN * 0.5 if _touch else left
 	_menu_panel.offset_right = -_safe.z - TOUCH_MARGIN
 	_menu_panel.offset_top = _safe.y + TOUCH_MARGIN
 	_menu_panel.offset_bottom = _menu_panel.offset_top
 	_menu_home = _menu_panel.position
+	_place_dev_button()
 
 	_dock.vertical = portrait
 	_dock.offset_left = left
@@ -1066,6 +1062,18 @@ func _layout_touch() -> void:
 	_update_cover.call_deferred()
 
 
+## The developer button (developer mode only): under the menu button in the touch layout, under
+## the menu where there is no menu button.
+func _place_dev_button() -> void:
+	_dev_button.visible = Preferences.developer_mode()
+	_dev_button.size = _dev_button.custom_minimum_size
+	if _touch:
+		_dev_button.position = _menu_button.position + Vector2(0.0, ROUND_BUTTON_PX + TOUCH_MARGIN)
+	else:
+		_dev_button.position = Vector2(_menu_panel.position.x,
+				_menu_panel.position.y + _menu_panel.size.y + TOUCH_MARGIN)
+
+
 ## The screen's safe area in canvas pixels; only phones and tablets report one.
 func _read_safe_area() -> void:
 	if _safe_from_cmdline or not OS.has_feature("mobile"):
@@ -1081,12 +1089,12 @@ func _read_safe_area() -> void:
 
 ## Tells the view what the open overlays cover, and keeps the current step clear of them.
 func _update_cover() -> void:
-	if not _touch or not _overlay_moving.is_empty():
+	if not _overlay_moving.is_empty():
 		return  # A moving overlay calls again when it has arrived.
 	var top := _safe.y
 	if _menu_panel.visible:
 		top = _menu_panel.get_rect().end.y
-	var bottom := size.y - _list_button.position.y
+	var bottom := size.y - _bottom_row
 	if _list_panel.visible or _text_panel.visible:
 		bottom = size.y - _dock.get_rect().position.y
 	_view.set_covered(top + _symbols_room(), bottom)
@@ -1104,10 +1112,7 @@ func _update_symbols() -> void:
 		return
 	_symbols.visible = show
 	_symbols_placed = false
-	if _touch:
-		_update_cover()
-	else:
-		_update_layout()
+	_update_cover()
 
 
 ## Height the symbol window takes from the top of the pattern, with its gap (and the round
@@ -1118,21 +1123,29 @@ func _symbols_room() -> float:
 	return StepSymbols.SIDE + TOUCH_MARGIN + _symbols_drop(_symbols_top)
 
 
-## How far the symbol window goes down from `top` to pass under the touch layout's round
-## buttons on the left (menu, developer button) when it is too wide to sit beside them.
+## How far the symbol window goes down from `top` to pass under the round buttons on the left
+## (menu button, developer button) when it is too wide to sit beside them.
 func _symbols_drop(top: float) -> float:
-	if not _touch:
+	var buttons := _left_buttons()
+	if buttons.is_empty() or _symbols.size.x <= size.x - _safe.z - TOUCH_MARGIN - _symbols_left_limit():
 		return 0.0
-	var buttons := _dev_button if _dev_button.visible else _menu_button
-	var beside := size.x - _safe.z - TOUCH_MARGIN - _symbols_left_limit()
-	if _symbols.size.x <= beside:
-		return 0.0
-	return maxf(buttons.get_rect().end.y - top, 0.0)
+	return maxf(buttons.back().get_rect().end.y - top, 0.0)
 
 
-## Left edge the symbol window keeps clear of in the touch layout: the round buttons' column.
+## Left edge the symbol window keeps clear of: the round buttons' column, if there is one.
 func _symbols_left_limit() -> float:
-	return _menu_button.get_rect().end.x + TOUCH_MARGIN if _touch else 0.0
+	var buttons := _left_buttons()
+	return buttons.back().get_rect().end.x + TOUCH_MARGIN if not buttons.is_empty() else 0.0
+
+
+## The round buttons at the top left, top to bottom: the menu's (touch layout) and the developer
+## button (developer mode).
+func _left_buttons() -> Array[Control]:
+	var buttons: Array[Control] = []
+	for button: Control in [_menu_button, _dev_button]:
+		if button.visible:
+			buttons.append(button)
+	return buttons
 
 
 ## Puts the symbol window (as wide as its cards) in the middle at the top of the pattern, `top`
@@ -1179,14 +1192,18 @@ func _on_view_gesture(action: Callable) -> void:
 
 ## The overview in the touch layout starts with the colour list and the project info open.
 func _open_overview_panels() -> void:
-	if _touch and _project != null:
+	if not _touch:
+		_open_all_panels()
+	elif _project != null:
 		_set_overlay(_list_panel, _list_button, true)
 		_set_overlay(_text_panel, _text_button, true)
 
 
 ## Stitching starts with the touch panels open or closed as they were left last time.
 func _open_stitch_panels() -> void:
-	if _touch:
+	if not _touch:
+		_open_all_panels()
+	else:
 		_set_overlay(_list_panel, _list_button, Preferences.stitch_list_open())
 		_set_overlay(_text_panel, _text_button, Preferences.stitch_text_open())
 
@@ -1223,16 +1240,53 @@ func _input(event: InputEvent) -> void:
 	_close_picker("", "")
 
 
+## Keys that no window or text field took: + and − zoom, WASD and the arrows move the view while
+## held; while stitching Space is the next step, Backspace or Delete the one before, Enter a new
+## thread, Tab the other side and Q the overview. Combinations with Ctrl, Cmd or Alt stay the
+## system's and the browser's.
 func _unhandled_key_input(event: InputEvent) -> void:
-	if _stitch_thread < 0 or not event.is_pressed() or event.is_echo():
+	var key := event as InputEventKey
+	if (not key.pressed or _project == null or _finale != null or _celebration != null
+			or key.ctrl_pressed or key.meta_pressed or key.alt_pressed):
 		return
-	var key := (event as InputEventKey).keycode
-	if key == KEY_SPACE:
+	var code := key.keycode
+	if PAN_KEYS.has(code):
+		_held_pan_keys[code] = true
+		set_process(true)
+	elif code in [KEY_PLUS, KEY_KP_ADD, KEY_EQUAL]:
+		_view.zoom_by(KEY_ZOOM)
+	elif code in [KEY_MINUS, KEY_KP_SUBTRACT]:
+		_view.zoom_by(1.0 / KEY_ZOOM)
+	elif _stitch_thread < 0 or key.echo:
+		return
+	elif code == KEY_SPACE:
 		_next_step()
-		get_viewport().set_input_as_handled()
-	elif key == KEY_BACKSPACE:
+	elif code in [KEY_BACKSPACE, KEY_DELETE]:
 		_previous_step()
-		get_viewport().set_input_as_handled()
+	elif code in [KEY_ENTER, KEY_KP_ENTER]:
+		_toggle_new_thread()
+	elif code == KEY_TAB:
+		_toggle_back_side()
+	elif code == KEY_Q:
+		_slide_to_overview()
+	else:
+		return
+	get_viewport().set_input_as_handled()
+
+
+## Moves the view while pan keys are held; asks the keyboard itself, so a release that a window
+## took still stops it.
+func _process(delta: float) -> void:
+	var direction := Vector2.ZERO
+	for code: Key in _held_pan_keys.keys():
+		if Input.is_key_pressed(code):
+			direction += PAN_KEYS[code]
+		else:
+			_held_pan_keys.erase(code)
+	if _held_pan_keys.is_empty():
+		set_process(false)
+	elif direction != Vector2.ZERO:
+		_view.pan_by(-direction.normalized() * KEY_PAN_SPEED * delta)
 
 
 func _open_image(path: String) -> void:
@@ -1762,10 +1816,9 @@ func _show_overall_progress() -> void:
 func _show_finale() -> void:
 	if _finale != null or _project == null:
 		return
-	if _touch:
-		for entry in [[_menu_panel, _menu_button], [_list_panel, _list_button], [_text_panel, _text_button]]:
-			_set_overlay(entry[0], entry[1], false, false)
-		_view.set_covered(Finale.covered_top(size), Finale.covered_bottom())
+	for entry in [[_menu_panel, _menu_button], [_list_panel, _list_button], [_text_panel, _text_button]]:
+		_set_overlay(entry[0], entry[1], false, false)
+	_view.set_covered(Finale.covered_top(size), Finale.covered_bottom())
 	_view.fit_to_view()
 	_finale = Finale.new()
 	add_child(_finale)
@@ -1779,6 +1832,8 @@ func _show_finale() -> void:
 func _on_finale_chosen(choice: Finale.Choice) -> void:
 	_finale = null
 	_loop_light(false)
+	if not _touch:
+		_open_all_panels()
 	_update_cover()
 	match choice:
 		Finale.Choice.OVERVIEW:
@@ -1788,6 +1843,23 @@ func _on_finale_chosen(choice: Finale.Choice) -> void:
 			_show_open_image()
 		Finale.Choice.OPEN_PROJECT:
 			_show_projects()
+
+
+## Presses a key as the keyboard would, for `--keys`: `entry` is its name (OS key names: Tab,
+## Space, Enter, Backspace, Plus, Minus, Up, W, Q, …), held for `:<seconds>` if given.
+func _press_key(entry: String) -> void:
+	var parts := entry.split(":")
+	var press := InputEventKey.new()
+	press.keycode = OS.find_keycode_from_string(parts[0])
+	press.pressed = true
+	Input.parse_input_event(press)
+	await get_tree().process_frame
+	if parts.size() > 1:
+		await get_tree().create_timer(parts[1].to_float()).timeout
+	var release := press.duplicate() as InputEventKey
+	release.pressed = false
+	Input.parse_input_event(release)
+	await get_tree().process_frame
 
 
 ## The bar shows the colour being stitched (in the colour of its block) or the whole project (in
@@ -1952,6 +2024,7 @@ func _handle_cmdline() -> void:
 	var wait := 0.0
 	var scroll := 0
 	var symbols_card := PackedStringArray()
+	var keys := PackedStringArray()
 	for arg in OS.get_cmdline_user_args():
 		if arg.begins_with("--open="):
 			_open_image(arg.trim_prefix("--open="))
@@ -2015,6 +2088,8 @@ func _handle_cmdline() -> void:
 			dismiss = true
 		elif arg.begins_with("--scroll="):
 			scroll = arg.trim_prefix("--scroll=").to_int()
+		elif arg.begins_with("--keys="):
+			keys = arg.trim_prefix("--keys=").split(",")
 		elif arg.begins_with("--wait="):
 			wait = arg.trim_prefix("--wait=").to_float()
 		elif arg.begins_with("--zoom="):
@@ -2088,6 +2163,10 @@ func _handle_cmdline() -> void:
 			_toggle_back_side()
 			if flip >= 0.0:
 				_view.hold_flip(flip)
+	while not keys.is_empty() and _view.is_page_sliding():
+		await get_tree().process_frame  # Entering stitching slides the page in first.
+	for entry in keys:
+		await _press_key(entry)
 	if _touch and (not overlays.is_empty() or not tooltip.is_empty()):
 		_set_overlay(_menu_panel, _menu_button, overlays.has("menu") or overlays.has("pin"), false)
 		_menu_pin.button_pressed = overlays.has("pin")

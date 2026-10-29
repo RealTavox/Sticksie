@@ -102,15 +102,23 @@ item is resolved during normal work, delete its entry in the same change.
   pressed button; the preview comes from
   `ProjectStore.preview()`, for now the source image, later meant to show the progress), `main.tscn`/`main.gd` the start screen (the settings' collapsible "Entwicklertools", built only when
   `OS.is_debug_build()`, so release exports leave them out, hold the light, the sample image and
-  the developer mode, which shows a toggle `RoundButton` without a job yet under the menu button): two layouts
-  built from the same widgets, moved by `_apply_ui_mode()`: desktop (toolbar, side panel) and
-  touch (view on the whole screen, round buttons for the menu top left, which closes itself on
-  the next touch of the view unless pinned, the colour list / stitching buttons bottom left, the
-  texts bottom right; all inside the display's safe area; `_set_overlay()` slides and fades
-  them in and out (panels stacked in the dock move along as one), then the view glides the
-  current step clear of them; the overview opens the
-  colour list and info by itself), `ProgressStrip` the progress bar
-  between the bottom round buttons (desktop: under everything): grey capsule track, capsule fill
+  the developer mode, which shows a toggle `RoundButton` without a job yet under the menu button, or under the menu without one): one look for both
+  layouts (`_build_shell()`, `_update_layout()`): the view on the whole screen, see-through panels
+  on it: the menu (toolbar) at the top, the texts and the colour list / stitching buttons at the
+  bottom, all inside the display's safe area. Touch (`_apply_ui_mode()`): round buttons open
+  them, the menu top left, which closes itself on the next touch of the view unless pinned, the
+  colour list / stitching buttons bottom left, the texts bottom right; `_set_overlay()` slides and
+  fades them in and out (panels stacked in the dock move along as one), then the view glides the
+  current step clear of them; the overview opens the colour list and info by itself. Mouse and
+  keyboard: no round buttons and no pin, the panels always open (`_open_all_panels()`, closed only
+  for the finale), the bar along the whole bottom, the hints name keys and clicks
+  (`StitchPanel.DESKTOP_HINT`, `KEYS_HINT` under the colour list). Keys in any layout
+  (`_unhandled_key_input()`, not with Ctrl/Cmd/Alt): + / − zoom (`PatternView.zoom_by()`), WASD and
+  the arrows move the view while held (`_process()`, `pan_by()`); while stitching Space next,
+  Backspace / Delete back, Enter new thread, Tab front/back, Q overview. The colour list's
+  content is fitted again whenever its minimum size changes (wrapped labels first measure at no
+  width), `ProgressStrip` the progress bar
+  between the bottom round buttons (mouse and keyboard: along the whole bottom): grey capsule track, capsule fill
   in the block colour (blue in the overview), progress counted in legs
   (`StitchSession.leg_progress()`, a half stitch is one of two); going up it flashes the new
   part white, pops and fills after it with long bands of light, at most two at a time, winding
@@ -187,7 +195,7 @@ How to check a change; every fix and feature runs these. Godot binary:
    skip limit (-1: none), `--start=<auto|top-left|top-right|bottom-left|bottom-right>` the start corner, `--settings` to open the settings dialog, `--projects` the project list, `--back` the back side while stitching,
    `--method=<danish|english>`, `--back-pass=<whole|blocks>`, `--max-block=<n>`, `--needle=<auto|bottom|top>`, `--first-leg=<slash|backslash>`
    (both fix the style), `--dev-tools` with `--settings` for the developer tools, `--scroll=<px>` scrolls the open window (settings, project list) that far down before the screenshot, `--dev=<on|off>` the developer mode (saved), `--symbols=<on|off|still|animated>` the symbol window or its still pictures (saved) or
-   `--symbols=<secure|thread|anchor|count|stitch>[,<0..1>]` to hold that card at that point of its animation, `--ui=<touch|desktop>` the layout, `--ui-scale=<factor>` the UI-Skalierung (saved), `--import=<path>` imports an exported project, `--export=<path>` writes the open project's export there, `--storage=<safe|may-clear|not-kept>` fakes the browser storage's safety for the warnings,
+   `--symbols=<secure|thread|anchor|count|stitch>[,<0..1>]` to hold that card at that point of its animation, `--ui=<touch|desktop>` the layout, `--keys=<key>[:<seconds>],…` presses keys after the steps (OS key names, e.g. Tab, Space, BackSpace, Plus, D:0.4 held), `--ui-scale=<factor>` the UI-Skalierung (saved), `--import=<path>` imports an exported project, `--export=<path>` writes the open project's export there, `--storage=<safe|may-clear|not-kept>` fakes the browser storage's safety for the warnings,
    `--overlays=<menu,pin,list,text>` opens touch overlays, `--picker=<code>` the colour picker
    for a colour of the list, `--picker-view=<list,project>` its list view and/or project filter, `--pick=<code>` chooses a colour in it, `--tooltip=<menu|list|text>` shows a
    round button's tooltip, `--safe-area=<l>,<t>,<r>,<b>` fakes a notch or island (canvas px), `--finish` stitches the rest of the `--stitch` colour (the celebration comes in), `--dismiss` taps it away to the overview, `--finale` shows the finished-project show, `--wait=<seconds>` waits that long before the screenshot (e.g. into the bar's fill; otherwise screenshots wait for the fill), `--zoom=<cell px>`
