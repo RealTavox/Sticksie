@@ -238,7 +238,7 @@ state `HALF` means the first leg) and always up at the bottom or always at the t
 
 Thread changes: `StitchStep.travel_before` is the cells skipped on the back from the previous
 step's last stitch (Chebyshev distance − 1, so a neighbour, diagonal or next row is 0). With a
-skip limit (`Preferences.max_skip()`, default `StitchPlanner.UNLIMITED`), a step travelling
+skip limit (`Preferences.max_skip()`, default `Preferences.DEFAULT_MAX_SKIP` = 3, `StitchPlanner.UNLIMITED` for none), a step travelling
 further `starts_thread`, and the in-row gap limit drops to min(3, limit). Manual thread changes
 live in `StitchSession` keyed by (first cell, kind), so they survive replanning; changing the
 limit replans via `StitchSession.set_max_skip()`, which takes progress over from the cells.
