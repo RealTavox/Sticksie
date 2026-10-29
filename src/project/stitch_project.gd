@@ -76,6 +76,7 @@ func replace_color(old_code: String, new_code: String, palette: FlossPalette) ->
 	session.english = old_session.english
 	session.whole_back = old_session.whole_back
 	session.max_block = old_session.max_block
+	session.style = old_session.style
 	session.restore_manual_starts(manual)
 	session.restore(states)
 

@@ -16,6 +16,7 @@ func _initialize() -> void:
 	_test_planner_order()
 	_test_start_corner()
 	_test_shortest_start()
+	_test_optimal_path()
 	_test_planner_covers_sample()
 	_test_session()
 	_test_position_hint()
@@ -272,8 +273,8 @@ func _test_start_corner() -> void:
 ## Every cell of a thread is stitched exactly once as a whole cross, in blocks of at most 5.
 func _test_shortest_start() -> void:
 	# Scattered stitches: starting top left leaves the thread jumping back and forth more than
-	# the best corner does.
-	var pattern := _pattern(["...0..", ".000.0", ".....0", "...0.0"])
+	# starting where it is shortest.
+	var pattern := _pattern(["......", "00..0.", "......", ".....0"])
 	var shortest := StitchPlanner.plan_shortest(pattern, 0)
 	var best := StitchPlanner.thread_cost(shortest)
 	for corner in StitchPlanner.CORNERS:
@@ -295,6 +296,44 @@ func _test_shortest_start() -> void:
 		var auto := StitchPlanner.thread_cost(StitchPlanner.plan_shortest(sample, thread))
 		_check(auto <= StitchPlanner.thread_cost(StitchPlanner.plan(sample, thread)),
 				"sample thread %d: automatic start no longer than top left" % thread)
+
+
+## The planner finds the least thread: small threads exactly (no corner start does better),
+## and the same plan every time; the sample's colours stay within their known optimum (exact
+## dynamic programming, 5642.3 cells of thread on the back over all colours).
+func _test_optimal_path() -> void:
+	var random := RandomNumberGenerator.new()
+	random.seed = 3
+	var worse := 0
+	for attempt in 40:
+		var rows: Array[String] = []
+		for y in 4:
+			var line := ""
+			for x in 6:
+				line += "0" if random.randf() < 0.35 else "."
+			rows.append(line)
+		var pattern := _pattern(rows)
+		if pattern.stitch_counts().is_empty() or pattern.stitch_counts()[0] == 0:
+			continue
+		var best := StitchPlanner.thread_cost(StitchPlanner.plan_shortest(pattern, 0))
+		for corner in StitchPlanner.CORNERS:
+			if best > StitchPlanner.thread_cost(StitchPlanner.plan(pattern, 0, corner.x == 1, corner.y == 1)) + 1e-6:
+				worse += 1
+	_check(worse == 0, "small threads: %d corner starts beat the shortest plan" % worse)
+	var sample := PatternImporter.from_image(load("res://samples/hypsi_anhaenger.png") as Image,
+			FlossPalette.dmc())
+	var total := 0.0
+	for thread in sample.thread_codes.size():
+		var steps := StitchPlanner.plan_shortest(sample, thread, StitchPlanner.UNLIMITED, false, true)
+		total += StitchPlanner.thread_cost(steps)
+		if thread == 0:
+			var again := StitchPlanner.plan_shortest(sample, thread, StitchPlanner.UNLIMITED, false, true)
+			var same := _describe(again) == _describe(steps)
+			for i in steps.size():
+				# As text: an unset hole is NAN, which never equals itself.
+				same = same and str(again[i].first_hole) == str(steps[i].first_hole) and str(again[i].last_hole) == str(steps[i].last_hole)
+			_check(same, "the same plan every time")
+	_check(total < 5642.3 * 1.005, "sample within 0.5 %% of the optimum: %.1f" % total)
 
 
 func _test_planner_covers_sample() -> void:
@@ -619,21 +658,23 @@ func _starts(steps: Array[StitchStep]) -> Array[bool]:
 
 func _test_thread_changes() -> void:
 	var pattern := _pattern(["00...00....0", "000........."])
-	# Row 1 touches the first segment of row 0, so it comes before the lone cross at 11.
+	# Row 1 touches the first segment of row 0, so it comes before the lone cross at 11; it is
+	# begun at its right end, nearer to that cross.
 	var unlimited := StitchPlanner.plan(pattern, 0)
 	_check(_starts(unlimited) == [true, false, false, false, false, false, false],
 			"without a limit only the first step starts a thread: %s" % [_starts(unlimited)])
-	_check(unlimited[6].travel_before == 10 and str(unlimited[4]) == "HALF row 1 [0, 1, 2]",
+	_check(unlimited[6].travel_before == 8 and str(unlimited[4]) == "HALF row 1 [2, 1, 0] skip 1",
 			"area first, then the long way: %s" % [_describe(unlimited)])
 
 	# Limit 2: the gap of 3 now splits the row, and every way longer than 2 needs a new thread.
+	# Row 1 from the right reaches 5, 6 within the limit, so only the cross needs a new thread.
 	var limited := StitchPlanner.plan(pattern, 0, true, true, 2)
 	var got := _describe(limited)
-	var expected := ["HALF row 0 [0, 1]", "BACK row 0 [1, 0]", "HALF row 1 [0, 1, 2]",
-			"BACK row 1 [2, 1, 0]", "HALF row 0 [5, 6] skip 4", "BACK row 0 [6, 5]",
+	var expected := ["HALF row 0 [0, 1]", "BACK row 0 [1, 0]", "HALF row 1 [2, 1, 0] skip 1",
+			"BACK row 1 [0, 1, 2]", "HALF row 0 [5, 6] skip 2", "BACK row 0 [6, 5]",
 			"CROSS row 0 [11] skip 5"]
 	_check(got == expected, "limit 2 splits at gap 3: %s" % [got])
-	_check(_starts(limited) == [true, false, false, false, true, false, true],
+	_check(_starts(limited) == [true, false, false, false, false, false, true],
 			"limit 2 thread starts: %s" % [_starts(limited)])
 
 	# The next row directly below is no skip.
@@ -653,7 +694,8 @@ func _test_thread_changes() -> void:
 	_check(session.done_count(0) == 4 and session.current_index(0) == 2,
 			"progress taken over: %d done, next %d" % [session.done_count(0), session.current_index(0)])
 	_check(session.last_cell(0) == Vector2i(0, 0), "needle at the end of the last done step before")
-	_check(session.thread_start(0, 4) == StitchSession.ThreadStart.AUTO, "step 4 starts a new thread")
+	_check(session.thread_start(0, 6) == StitchSession.ThreadStart.AUTO
+			and session.thread_start(0, 4) == StitchSession.ThreadStart.NONE, "only step 6 starts a new thread")
 	_check(session.thread_start(0, 0) == StitchSession.ThreadStart.FIRST, "first step is FIRST")
 	_check(session.thread_start(0, 3) == StitchSession.ThreadStart.NONE, "return pass is no start")
 	session.go_back(0)
@@ -789,7 +831,8 @@ func _test_back_side() -> void:
 
 
 ## Automatic: the needle comes up where the back stays shortest, so every Danish pass leaves only
-## vertical stitches, to the left as well (the diagonal stitches of a fixed "up at the bottom").
+## stitches of one hole on the back, to the left as well (the diagonal stitches of a fixed "up at
+## the bottom"), and never comes up through the hole it just went down through.
 ## Fixed: exactly the chosen holes and leg order.
 func _test_stitch_style() -> void:
 	var auto := StitchStyle.new()
@@ -800,14 +843,20 @@ func _test_stitch_style() -> void:
 	var right_back := StitchStep.new(StitchStep.Kind.BACK, 0, 0, PackedInt32Array([2, 3]), 1)
 	_check(StitchPanel.describe_corner(right_back, auto) == "oben links", "auto: return pass to the right comes up top left")
 	var pattern := PatternImporter.from_image(load("res://samples/hypsi_anhaenger.png") as Image, FlossPalette.dmc())
-	var slanted := 0
+	var long := 0
+	var same_hole := 0
 	for start_left in [true, false]:
 		for thread in pattern.thread_codes.size():
+			var down := Vector2(NAN, NAN)
 			for step in StitchPlanner.plan(pattern, thread, true, start_left):
 				var segments := BackSide.step_segments(step, auto)
 				for i in range(0, segments.size(), 2):
-					slanted += 0 if segments[i].x == segments[i + 1].x else 1
-	_check(slanted == 0, "auto: %d back stitches inside Danish steps are not vertical" % slanted)
+					long += 0 if is_equal_approx(segments[i].distance_to(segments[i + 1]), 1.0) else 1
+				var holes := auto.needle_holes(step)
+				same_hole += 1 if holes[0] == down else 0
+				down = holes[-1]
+	_check(long == 0, "auto: %d back stitches inside Danish steps are longer than one hole" % long)
+	_check(same_hole == 0, "auto: %d steps come up through the hole just gone down through" % same_hole)
 
 	var bottom := StitchStyle.create(StitchStyle.Needle.FROM_BOTTOM, true)
 	_check(StitchPanel.describe_corner(left, bottom) == "unten links", "fixed bottom: always up at the bottom")

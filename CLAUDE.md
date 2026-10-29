@@ -29,7 +29,7 @@ item is resolved during normal work, delete its entry in the same change.
   fast; developer mode in section `dev`, only honoured in
   debug builds); `palette/` thread colours and Lab matching, `pattern/` the `Pattern`
   resource, `import/` PNG → pattern, `planner/` Danish stitch order (`StitchPlanner` →
-  `StitchStep`s), `stitching/` progress per thread (`StitchSession`), the back of the fabric
+  `StitchStep`s; `PathOptimizer` finds the order with the least thread on the back), `stitching/` progress per thread (`StitchSession`), the back of the fabric
   (`BackSide`: the thread between the needle holes, worked out from the planned steps; drawn
   mirrored by `PatternView.back_side`), where the needle comes up (`StitchStyle`, see Planner
   rules) and position hints
@@ -200,13 +200,24 @@ a row segment ends at a gap of more than 3 cells (`MAX_GAP`); a segment of one s
 single full cross; blocks hold at most `max_block` stitches (`Preferences.max_block()`, default 5 =
 `DEFAULT_MAX_BLOCK`; `StitchSession.set_max_block()` replans like the skip limit) and are split evenly
 (7 → 4 + 3); a block never has a gap inside: each run of adjacent cells is split on its own and
-the thread skips on the back only between blocks; every segment starts at its end nearer to the needle (on a tie the start side; legs stay `/` then `\` either way), and the Danish return pass ends there. Order: segments
-in neighbouring rows that overlap or touch diagonally form an area (`connected_areas()`); an
-area is finished before the next and grows without holes (`_next_segment()`): first candidates
-are open segments touching the one just finished, then open segments of the area touching any
-finished one, then other areas. Within a tier the nearest to the needle wins (Chebyshev skip from
-the end the last segment began at to the nearer end of the candidate), ties go to row order. `tests/run_tests.gd` checks on the
-sample that every segment after an area's first touches an earlier one.
+the thread skips on the back only between blocks. Order: the least thread on the back
+(`PathOptimizer`, cost = `StitchPlanner.thread_cost()`: hole to hole as `StitchStyle` works the
+stitches, inside and between steps, `THREAD_START_COST` per new thread). Each segment has ways
+(which end it starts at, through which hole the needle goes down last) with entries (the hole it
+first comes up through); the plan sets them as `StitchStep.first_hole` / `last_hole`. Hard rules
+kept: segments in neighbouring rows that overlap or touch diagonally form an area
+(`connected_areas()`, `touching()`: one sweep, O(n)); an area is finished before the next, and
+every segment after an area's first touches an earlier one (grows without holes); never up
+through the hole just gone down through. Search: threads of at most `EXACT_SEGMENTS` segments
+exactly (dynamic programming over the allowed sets, capped by `EXACT_WORK`); else greedy from
+several starts (corners, ends of the longest way through the largest area, the end of the first
+plan) plus local search (area order: moves, reversals, seeded random swaps; inside areas: run
+moves and reversals around jumps, exact windows, small areas exactly, exact first/last `ENDS`
+segments; exact ways by DP), all within a counted work budget (`BUDGET`, `BUDGET_PER_SEGMENT`,
+`KICK_BUDGET_PER_AREA`), so plans are deterministic and device-independent. Checked against an
+exact reference solver: on the sample 0.11 % above the optimum (9 of 10 colours optimal), 2.5 %+
+less thread than the old greedy order. `tests/run_tests.gd` checks on the sample that every
+segment after an area's first touches an earlier one.
 
 Whole return pass (`Preferences.whole_back()`, default on; `StitchSession.set_whole_back()`
 replans): the Danish return pass is one `BACK` step per run of adjacent cells instead of blocks
@@ -231,13 +242,12 @@ further `starts_thread`, and the in-row gap limit drops to min(3, limit). Manual
 live in `StitchSession` keyed by (first cell, kind), so they survive replanning; changing the
 limit replans via `StitchSession.set_max_skip()`, which takes progress over from the cells.
 
-Start corner: `Preferences.auto_start()` (default on) plans every thread from all four corners
-(`StitchPlanner.plan_shortest()`) and keeps the one with the least thread on the back
-(`thread_cost()`: straight-line way between steps, `THREAD_START_COST` per new thread; tie:
-order of `CORNERS`, top left first). Off: `Preferences.top_to_bottom()` / `start_left()` (rows to
-the right, then down, for top left) set the row order and the start side; they decide where the
-first segment begins and break ties. Changing any of them replans via
-`StitchSession.set_direction()` like the skip limit. `StitchSession.auto_start` is not saved in
+Start corner: `Preferences.auto_start()` (default on) starts wherever the thread is shortest
+(`StitchPlanner.plan_shortest()`). Off: `Preferences.top_to_bottom()` / `start_left()` fix the first
+segment (the first in row order from that corner, from that side); the rest is optimised. Changing any of them replans via
+`StitchSession.set_direction()` like the skip limit. Replanning is lazy: `restore()` only keeps the
+cell states, each thread is planned (and takes its progress over) when first needed, so several
+setting changes in a row plan once. `StitchSession.auto_start` is not saved in
 the project file (no format change); `main.gd` `_apply_preferences()` pushes all three
 preferences into the open project.
 

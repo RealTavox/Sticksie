@@ -42,6 +42,9 @@ var whole_back := false
 ## Most stitches in one block. Change it with set_max_block(), which replans. Not saved with the
 ## project either.
 var max_block := StitchPlanner.DEFAULT_MAX_BLOCK
+## How the crosses are worked: the planner measures the thread by its holes. Change it with
+## set_style(), which replans. Not saved with the project; it comes from the preferences.
+var style := StitchStyle.new()
 
 var _plans := {}  # thread index -> Array[StitchStep]
 ## Per thread index, one flag per planned step: 1 when done. Not just "the first n steps", since
@@ -50,6 +53,9 @@ var _done := {}  # thread index -> PackedByteArray
 ## Manual thread changes per thread index, each as the step's key (see step_key()). Keys instead
 ## of step numbers, so they stay at the same stitch when the plan changes.
 var _manual_starts := {}  # thread index -> Array[Vector3i]
+## Cell states that progress is taken over from (restore()), for each thread when it is planned:
+## planning waits until a thread is needed, so changing several settings in a row plans only once.
+var _saved_states := PackedByteArray()
 
 
 func _init(p_pattern: Pattern) -> void:
@@ -60,10 +66,11 @@ func steps(thread: int) -> Array[StitchStep]:
 	if not _plans.has(thread):
 		if auto_start:
 			_plans[thread] = StitchPlanner.plan_shortest(pattern, thread, max_skip, english, whole_back,
-					max_block)
+					max_block, style)
 		else:
 			_plans[thread] = StitchPlanner.plan(pattern, thread, top_to_bottom, start_left, max_skip,
-					english, whole_back, max_block)
+					english, whole_back, max_block, style)
+		_restore_thread(thread)
 	return _plans[thread]
 
 
@@ -116,7 +123,7 @@ func last_cell(thread: int) -> Vector2i:
 func set_max_skip(value: int) -> void:
 	if value == max_skip:
 		return
-	var states := cell_states()
+	var states := _carried_states()
 	max_skip = value
 	_replan(states)
 
@@ -126,7 +133,7 @@ func set_max_skip(value: int) -> void:
 func set_direction(p_top_to_bottom: bool, p_start_left: bool, auto := false) -> void:
 	if p_top_to_bottom == top_to_bottom and p_start_left == start_left and auto == auto_start:
 		return
-	var states := cell_states()
+	var states := _carried_states()
 	top_to_bottom = p_top_to_bottom
 	start_left = p_start_left
 	auto_start = auto
@@ -138,7 +145,7 @@ func set_direction(p_top_to_bottom: bool, p_start_left: bool, auto := false) -> 
 func set_english(value: bool) -> void:
 	if value == english:
 		return
-	var states := cell_states()
+	var states := _carried_states()
 	english = value
 	_replan(states)
 
@@ -148,7 +155,7 @@ func set_english(value: bool) -> void:
 func set_whole_back(value: bool) -> void:
 	if value == whole_back:
 		return
-	var states := cell_states()
+	var states := _carried_states()
 	whole_back = value
 	_replan(states)
 
@@ -157,14 +164,22 @@ func set_whole_back(value: bool) -> void:
 func set_max_block(value: int) -> void:
 	if value == max_block:
 		return
-	var states := cell_states()
+	var states := _carried_states()
 	max_block = value
 	_replan(states)
 
 
-## Drops every plan and takes progress over from `states` (cell_states() taken before the change).
+## Changes how the crosses are worked and replans, keeping progress like set_max_skip().
+func set_style(value: StitchStyle) -> void:
+	if value.equals(style):
+		return
+	var states := _carried_states()
+	style = StitchStyle.create(value.needle, value.slash_first)
+	_replan(states)
+
+
+## Drops every plan and takes progress over from `states` (cell states taken before the change).
 func _replan(states: PackedByteArray) -> void:
-	_plans.clear()
 	restore(states)
 
 
@@ -226,10 +241,7 @@ func restore_manual_starts(by_code: Dictionary) -> void:
 
 
 func has_progress() -> bool:
-	for thread: int in _done:
-		if _done[thread].has(1):
-			return true
-	return false
+	return cell_states().count(Cell.NONE) < pattern.cells.size()
 
 
 ## Number of whole crosses of `thread` already stitched.
@@ -268,12 +280,26 @@ func leg_progress(thread := -1) -> float:
 
 ## Cell value per cell (row by row), from the finished steps of every thread.
 func cell_states() -> PackedByteArray:
+	for thread in pattern.thread_codes.size():
+		steps(thread)
+	return _carried_states()
+
+
+## Like cell_states(), but threads not planned since restore() keep their saved states instead of
+## being planned for it.
+func _carried_states() -> PackedByteArray:
 	var states := PackedByteArray()
 	states.resize(pattern.width * pattern.height)
 	states.fill(Cell.NONE)
 	for thread in pattern.thread_codes.size():
-		var all := steps(thread)
-		var flags := _flags(thread)
+		if not _plans.has(thread):
+			if not _saved_states.is_empty():
+				for cell in states.size():
+					if pattern.cells[cell] == thread:
+						states[cell] = _saved_states[cell]
+			continue
+		var all: Array[StitchStep] = _plans[thread]
+		var flags: PackedByteArray = _done[thread]
 		for i in all.size():
 			if not flags[i]:
 				continue
@@ -286,42 +312,51 @@ func cell_states() -> PackedByteArray:
 
 ## Restores progress from saved cell states: a step is done when the fabric already shows it
 ## (its cells have at least a bottom leg for half stitches, a whole cross otherwise). This works
-## whatever order the plan has now, so changed settings or planner rules keep the progress.
+## whatever order the plan has now, so changed settings or planner rules keep the progress. Each
+## thread takes it over when it is planned next.
+func restore(saved_states: PackedByteArray) -> void:
+	_plans.clear()
+	_done.clear()
+	_saved_states = saved_states
+
+
+## Takes progress over from the saved states for the newly planned `thread`.
 ##
 ## A step with stitched and unstitched cells (a longer step in the new plan, e.g. a whole return
 ## pass after blocks of 5, or two colours merged into one) is split where they meet, so those
 ## stitches aren't lost.
-func restore(saved_states: PackedByteArray) -> void:
-	_done.clear()
-	for thread in pattern.thread_codes.size():
-		var all := steps(thread)
-		var flags := PackedByteArray()
-		var i := 0
-		while i < all.size():
-			var step := all[i]
+func _restore_thread(thread: int) -> void:
+	var all: Array[StitchStep] = _plans[thread]
+	var flags := PackedByteArray()
+	var i := 0
+	while i < all.size():
+		var step := all[i]
+		var done := false
+		if not _saved_states.is_empty():
 			var needed := Cell.HALF if step.kind == StitchStep.Kind.HALF else Cell.FULL
-			var done := saved_states[step.row * pattern.width + step.cells[0]] >= needed
+			done = _saved_states[step.row * pattern.width + step.cells[0]] >= needed
 			var same := 1
 			while (same < step.cells.size()
-					and (saved_states[step.row * pattern.width + step.cells[same]] >= needed) == done):
+					and (_saved_states[step.row * pattern.width + step.cells[same]] >= needed) == done):
 				same += 1
 			if same < step.cells.size():
 				var rest := StitchStep.new(step.kind, thread, step.row, step.cells.slice(same), step.direction)
+				# The rest goes on where the needle was in the whole step, and ends as it did.
+				var legs := 2 if step.kind == StitchStep.Kind.CROSS else 1
+				rest.first_hole = style.needle_holes(step)[same * legs * 2]
+				rest.last_hole = step.last_hole
+				step.last_hole = Vector2(NAN, NAN)
 				step.cells = step.cells.slice(0, same)
 				all.insert(i + 1, rest)
-			flags.append(1 if done else 0)
-			i += 1
-		_done[thread] = flags
+		flags.append(1 if done else 0)
+		i += 1
+	_done[thread] = flags
 
 
-## The done flags of `thread`, created on first use. PackedByteArray is a value type: writing to
-## the returned array doesn't change the stored one, use _set_flag() for that.
+## The done flags of `thread`, planning it first if needed. PackedByteArray is a value type:
+## writing to the returned array doesn't change the stored one, use _set_flag() for that.
 func _flags(thread: int) -> PackedByteArray:
-	if not _done.has(thread):
-		var flags := PackedByteArray()
-		flags.resize(steps(thread).size())
-		flags.fill(0)
-		_done[thread] = flags
+	steps(thread)
 	return _done[thread]
 
 

@@ -1269,13 +1269,17 @@ func _apply_preferences() -> void:
 	_project.session.set_english(Preferences.english())
 	_project.session.set_whole_back(Preferences.whole_back())
 	_project.session.set_max_block(Preferences.max_block())
+	_project.session.set_style(_style)
 
 
-## Hands the leg order and needle holes from the preferences to the view and the guide texts.
+## Hands the leg order and needle holes from the preferences to the view, the guide texts and the
+## planner.
 func _apply_style() -> void:
 	_style = StitchStyle.from_preferences()
 	_view.style = _style
 	_stitch_panel.style = _style
+	if _project != null:
+		_project.session.set_style(_style)
 
 
 func _open_project(path: String) -> void:

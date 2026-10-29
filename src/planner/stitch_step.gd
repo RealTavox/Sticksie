@@ -26,6 +26,11 @@ var travel_before := 0
 ## Whether a new thread begins with this step: the first step, or the way here skips more cells
 ## than the user's limit. Manual thread changes are kept by StitchSession, not here.
 var starts_thread := false
+## The hole the needle comes up through for the first leg, chosen by the planner for the least
+## thread on the back (StitchStyle.Needle.AUTO follows it). NAN: on the side the step comes from.
+var first_hole := Vector2(NAN, NAN)
+## Likewise the hole it goes down through last; NAN: wherever the last leg is nearest.
+var last_hole := Vector2(NAN, NAN)
 
 
 func _init(p_kind: Kind, p_thread: int, p_row: int, p_cells: PackedInt32Array, p_direction: int) -> void:
