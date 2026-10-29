@@ -6,10 +6,15 @@ const DEFAULT_LIGHT_AZIMUTH := 315.0
 const DEFAULT_LIGHT_ELEVATION := 55.0
 
 
-## Most cells the thread may skip on the back before the app asks for a new thread;
-## StitchPlanner.UNLIMITED (the default) means never.
+## The skip limit unless the user chose another: a new thread after more than 3 cells, the usual
+## choice and the one with the least thread.
+const DEFAULT_MAX_SKIP := 3
+
+
+## Most cells the thread may skip on the back before the app asks for a new thread
+## (DEFAULT_MAX_SKIP by default); StitchPlanner.UNLIMITED means never.
 static func max_skip() -> int:
-	return int(_load().get_value("stitching", "max_skip", StitchPlanner.UNLIMITED))
+	return int(_load().get_value("stitching", "max_skip", DEFAULT_MAX_SKIP))
 
 
 static func set_max_skip(value: int) -> void:

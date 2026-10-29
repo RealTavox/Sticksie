@@ -115,6 +115,11 @@ var _settings_dialog: OverlayWindow
 ## [panel, button] pairs; they open again when it closes.
 var _hidden_overlays: Array[Array] = []
 var _limit_box: CheckBox
+## Warnings under the settings with a recommended choice, shown only while another one is chosen.
+var _method_warning: Label
+var _corner_warning: Label
+var _guide_warning: Label
+var _limit_warning: Label
 var _corner_option: OptionButton
 var _limit_spin: SpinBox
 var _method_cards: ChoiceCards
@@ -703,10 +708,12 @@ func _build_settings_dialog() -> void:
 	var method_note := _make_note(METHODS[0])
 	content.add_child(method_note)
 	content.add_child(_make_note("Empfohlen: Dänisch."))
-	content.add_child(_make_warning())
+	_method_warning = _make_warning()
+	content.add_child(_method_warning)
 	_method_cards.selected_changed.connect(func(index: int) -> void:
 		method_note.text = METHODS[index]
-		_whole_back_box.disabled = index == 1)
+		_whole_back_box.disabled = index == 1
+		_update_warnings())
 	_whole_back_box = CheckBox.new()
 	_whole_back_box.text = "Dänisch: Rückweg in einem Zug bis zur nächsten Lücke (statt in Blöcken)"
 	_whole_back_box.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -729,12 +736,15 @@ func _build_settings_dialog() -> void:
 	content.add_child(_corner_option)
 	_corner_picture = SettingPicture.new(SettingPicture.Kind.CORNER, true)
 	content.add_child(_corner_picture)
-	_corner_option.item_selected.connect(func(index: int) -> void: _corner_picture.corner = index)
+	_corner_option.item_selected.connect(func(index: int) -> void:
+		_corner_picture.corner = index
+		_update_warnings())
 	content.add_child(_make_note("Empfohlen: Automatisch. Jede Farbe beginnt dort und läuft so, dass "
 			+ "am wenigsten Faden hinten weiterläuft oder neu nötig ist. Mit einer Ecke geht es dort "
 			+ "los, jede Reihe läuft von dieser Seite aus und die Reihen kommen in dieser Richtung dran "
 			+ "(Fläche für Fläche, so weit es geht)."))
-	content.add_child(_make_warning())
+	_corner_warning = _make_warning()
+	content.add_child(_corner_warning)
 	content.add_child(HSeparator.new())
 	_build_guide_settings(content)
 	content.add_child(HSeparator.new())
@@ -748,19 +758,24 @@ func _build_settings_dialog() -> void:
 	_limit_spin = SpinBox.new()
 	_limit_spin.min_value = 0
 	_limit_spin.max_value = 30
-	_limit_spin.value = 3
+	_limit_spin.value = Preferences.DEFAULT_MAX_SKIP
 	row.add_child(_limit_spin)
 	var unit := Label.new()
 	unit.text = "Felder überspringen müsste."
 	row.add_child(unit)
 	_limit_picture = SettingPicture.new(SettingPicture.Kind.THREAD_LIMIT, true)
 	content.add_child(_limit_picture)
-	content.add_child(_make_note("Aus: Der Faden wird nie automatisch gewechselt, er darf beliebig weit springen. "
-			+ "Üblich sind 2–3 Felder: längere Fäden auf der Rückseite verhaken sich und scheinen durch. "
-			+ "Einen neuen Faden kannst du beim Sticken jederzeit selbst nehmen."))
+	content.add_child(_make_note("Empfohlen: an, %d Felder. Aus: Der Faden wird nie automatisch gewechselt, "
+			% Preferences.DEFAULT_MAX_SKIP
+			+ "er darf beliebig weit springen. Längere Fäden auf der Rückseite verhaken sich und scheinen "
+			+ "durch. Einen neuen Faden kannst du beim Sticken jederzeit selbst nehmen."))
+	_limit_warning = _make_warning()
+	content.add_child(_limit_warning)
 	_limit_box.toggled.connect(func(on: bool) -> void:
 		_limit_spin.editable = on
-		_limit_picture.limit_on = on)
+		_limit_picture.limit_on = on
+		_update_warnings())
+	_limit_spin.value_changed.connect(func(_value: float) -> void: _update_warnings())
 	var light_row := _make_light_row()
 	if OS.is_debug_build():
 		_build_dev_tools(content, light_row)
@@ -835,7 +850,8 @@ func _build_guide_settings(content: VBoxContainer) -> void:
 			+ "Fest: jeder Schenkel genau so, wie gewählt. Auf der Rückseite kann der Faden dann "
 			+ "schräg über zwei Felder laufen. Nicht mitten im Projekt wechseln, sonst liegen die "
 			+ "oberen Schenkel nicht mehr gleich."))
-	content.add_child(_make_warning())
+	_guide_warning = _make_warning()
+	content.add_child(_guide_warning)
 
 
 ## A section title in the settings.
@@ -893,6 +909,17 @@ func _show_dev_tools(open: bool) -> void:
 	_dev_tools_box.visible = open
 
 
+## Shows each warning only while its setting differs from the recommended choice.
+func _update_warnings() -> void:
+	if _limit_warning == null or _guide_warning == null:
+		return  # still building the window
+	_method_warning.visible = _method_cards.selected != 0
+	_corner_warning.visible = _corner_option.selected != 0
+	_guide_warning.visible = _needle_option.selected != 0
+	_limit_warning.visible = (not _limit_box.button_pressed
+			or int(_limit_spin.value) != Preferences.DEFAULT_MAX_SKIP)
+
+
 ## The note under the settings that have a recommended choice.
 static func _make_warning() -> Label:
 	var warning := _make_note("Abweichend vom Empfohlenen braucht das Sticken deutlich mehr Faden, "
@@ -916,6 +943,7 @@ func _update_needle_options() -> void:
 	_leg_option.disabled = not fixed
 	_needle_start_option.disabled = not fixed
 	_guide_picture.style = _chosen_style()
+	_update_warnings()
 
 
 ## The stitch style as the settings window shows it.

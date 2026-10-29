@@ -247,8 +247,9 @@ Start corner: `Preferences.auto_start()` (default on) starts wherever the thread
 (`StitchPlanner.plan_shortest()`). Off: `Preferences.top_to_bottom()` / `start_left()` keep the user's direction:
 the first segment is the corner's, every segment is worked from the start side, and steps against
 the row order or the side cost `PathOptimizer.AGAINST_DIRECTION` more (`set_direction()`), so they
-only happen where areas and "grow without holes" force them. The settings say that leaving the
-recommended choices (automatic corner, automatic guide, Danish) costs clearly more thread. Changing any of them replans via
+only happen where areas and "grow without holes" force them. The settings name the recommended
+choices (Danish, automatic corner, automatic guide, thread change on at 3 cells) and show a
+warning (`main.gd` `_update_warnings()`) only while another one is chosen. Changing any of them replans via
 `StitchSession.set_direction()` like the skip limit. Replanning is lazy: `restore()` only keeps the
 cell states, each thread is planned (and takes its progress over) when first needed, so several
 setting changes in a row plan once. `StitchSession.auto_start` is not saved in
