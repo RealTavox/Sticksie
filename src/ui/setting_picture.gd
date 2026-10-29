@@ -212,8 +212,9 @@ func _corner_rows(origin: Vector2, side: float, columns: int, rows: int, top: bo
 				Color(1, 1, 1, alpha * pow(0.65, i)), 3.0)
 
 
-## The back of the fabric: two groups of stitches and the thread running on between them. With
-## the limit on, scissors cut it, so the long way becomes a new thread.
+## The back of the fabric: two groups of stitches and the thread running on between them, from
+## the bottom of the last stitch on the left up to the top of the first on the right. With the
+## limit on, scissors cut it, so the long way becomes a new thread.
 func _draw_thread_limit(box: Rect2) -> void:
 	var y := box.get_center().y + 8.0
 	var width := minf(box.size.x, box.size.y * 3.4)
@@ -221,16 +222,20 @@ func _draw_thread_limit(box: Rect2) -> void:
 	var bars: Array[float] = []
 	for share in [0.04, 0.13, 0.22, 0.78, 0.87, 0.96]:
 		bars.append(left + width * share)
-	var cut := box.get_center().x
+	var from := Vector2(bars[2], y + 14.0)
+	var to := Vector2(bars[3], y - 14.0)
 	if limit_on:
-		draw_line(Vector2(bars[2], y), Vector2(cut - 5.0, y + 3.0), Color.WHITE, 2.5)
-		draw_line(Vector2(cut + 5.0, y + 3.0), Vector2(bars[3], y), Color.WHITE, 2.5)
+		var cut := from.lerp(to, 0.5)
+		var along := (to - from).normalized()
+		# The cut ends hang down a little.
+		draw_line(from, cut - along * 5.0 + Vector2(0.0, 4.0), Color.WHITE, 2.5)
+		draw_line(cut + along * 5.0 + Vector2(0.0, 4.0), to, Color.WHITE, 2.5)
 		# Open, the thread between the blades halfway along them.
 		var direction := Vector2(-0.45, 1.0).normalized()
-		StepSymbols.draw_scissors(self, Vector2(cut, y) - direction * 17.0, direction, deg_to_rad(24.0),
+		StepSymbols.draw_scissors(self, cut - direction * 17.0, direction, deg_to_rad(24.0),
 				Color.WHITE, 1.3)
 	else:
-		draw_line(Vector2(bars[2], y), Vector2(bars[3], y), Color.WHITE, 2.5)
+		draw_line(from, to, Color.WHITE, 2.5)
 	for x in bars:
 		var bar := Rect2(x - 2.5, y - 14.0, 5.0, 28.0)
 		draw_rect(bar, Color.WHITE)

@@ -417,9 +417,13 @@ func _make_round_button(icon: ButtonIcons.Icon, tooltip: String, panel: Control)
 ## fades (the view keeps the current step clear of it once it has arrived).
 func _set_overlay(panel: Control, button: RoundButton, open: bool, animate := true) -> void:
 	button.set_pressed_no_signal(open)
+	var tween: Tween = _overlay_tweens.get(panel)
+	if open and panel.visible and tween == null and _overlay_moving.has(panel):
+		# An opening waiting for the dock's layout does it already (taking it over would leave the
+		# panel see-through: it is already visible, so this call would think it open).
+		return
 	var call: int = _overlay_calls.get(panel, 0) + 1
 	_overlay_calls[panel] = call
-	var tween: Tween = _overlay_tweens.get(panel)
 	if tween != null:
 		tween.kill()
 		_overlay_tweens.erase(panel)
