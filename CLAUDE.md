@@ -23,7 +23,8 @@ item is resolved during normal work, delete its entry in the same change.
   `settings.cfg` next to the projects (light direction and height in section `view`, default from the top left at 55°, set in the
   developer tools; skip limit, start corner or automatic, stitch method, block size, the
   stitch style; not saved in the project file, pushed into the open project; plus the touch or
-  desktop layout in section `ui`, default touch on mobile, and which touch panels are open while
+  desktop layout in section `ui`, default touch on phones and tablets, also in their browser
+  (features `web_ios`, `web_android`), and which touch panels are open while
   stitching, closed until opened, then as left, and whether the symbol window shows, default on,
   switched in the settings, as still pictures (the last frames) or animated, and how
   fast; developer mode in section `dev`, only honoured in

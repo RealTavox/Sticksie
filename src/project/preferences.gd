@@ -138,9 +138,10 @@ static func set_step_symbols_speed(value: float) -> void:
 
 ## Whether the screen is laid out for touch (a full-screen view with round buttons that open
 ## overlays) instead of the desktop layout with toolbar and side panel. Defaults to touch on
-## phones and tablets.
+## phones and tablets, in the app or in their browser.
 static func touch_mode() -> bool:
-	return bool(_load().get_value("ui", "touch", OS.has_feature("mobile")))
+	var handheld := OS.has_feature("mobile") or OS.has_feature("web_android") or OS.has_feature("web_ios")
+	return bool(_load().get_value("ui", "touch", handheld))
 
 
 static func set_touch_mode(value: bool) -> void:
