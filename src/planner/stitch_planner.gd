@@ -58,7 +58,9 @@ static func thread_cost(steps: Array[StitchStep], style: StitchStyle = null) -> 
 
 
 ## Steps for `thread` (index into pattern.thread_codes), area by area, beginning in the corner given
-## by `top_to_bottom` and `start_left`: the first segment of that corner's row, from that side.
+## by `top_to_bottom` and `start_left` and keeping that direction: every segment from that side,
+## the rows in that order wherever an area growing without holes allows (it costs more thread
+## than plan_shortest()).
 ## `max_skip` is the most cells the thread may skip on the back before a new thread is needed.
 ## `english` plans whole crosses instead of Danish passes. `whole_back` makes each return pass one
 ## step per run of adjacent cells. `max_block` is the most stitches in one block. `style` decides
@@ -105,7 +107,7 @@ static func _plan(pattern: Pattern, thread: int, top_to_bottom: bool, start_left
 		var y := segment_rows[i]
 		optimizer.add_segment(areas[i], y, mini(segment[0], segment[-1]), maxi(segment[0], segment[-1]))
 		var ends: Array = []
-		for end in (1 if segment.size() == 1 else 2):
+		for end in (1 if segment.size() == 1 or fixed_start else 2):
 			var cells := segment
 			if end == 1:
 				cells = segment.duplicate()
@@ -149,6 +151,8 @@ static func _plan(pattern: Pattern, thread: int, top_to_bottom: bool, start_left
 		worked.append(ends)
 	for k in range(0, pairs.size(), 2):
 		optimizer.add_touch(pairs[k], pairs[k + 1])
+	if fixed_start:
+		optimizer.set_direction(1 if top_to_bottom else -1, 1 if start_left else -1)
 	var down := Vector2(NAN, NAN)
 	for entry in optimizer.solve(0 if fixed_start else -1, fixed_ways):
 		var work: Array[StitchStep] = worked[entry_segments[entry]][entry_ends[entry]]

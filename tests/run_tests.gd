@@ -223,15 +223,16 @@ func _test_planner_order() -> void:
 	var steps := StitchPlanner.plan(pattern, 0, true, false)
 	_check(steps[0].direction == -1 and steps[1].direction == 1, "directions from the right")
 
-	# A segment starts at its end nearer to the needle, even against the start side: from the
-	# cross at 3, row 1 is worked from the right without a skip instead of 2 cells away.
+	# With a start corner every segment keeps its direction, even where the other end is nearer:
+	# from the cross at 3, row 1 is still worked from the left. The automatic start doesn't.
 	steps = StitchPlanner.plan(_pattern(["...0", "00.0"]), 0, true, true, 2)
 	got = _describe(steps)
-	expected = ["CROSS row 0 [3]", "HALF row 1 [3]", "HALF row 1 [1, 0] skip 1",
-			"BACK row 1 [0, 1]", "BACK row 1 [3] skip 1"]
-	_check(got == expected, "segment from the nearer end: %s" % [got])
-	_check(steps[1].direction == -1 and steps[3].direction == 1 and _starts(steps) == [
-			true, false, false, false, false], "nearer end needs no new thread")
+	expected = ["CROSS row 0 [3]", "HALF row 1 [0, 1] skip 2", "HALF row 1 [3] skip 1",
+			"BACK row 1 [3]", "BACK row 1 [1, 0] skip 1"]
+	_check(got == expected, "a start corner keeps the direction: %s" % [got])
+	var free := StitchPlanner.plan_shortest(_pattern(["...0", "00.0"]), 0, 2)
+	_check(StitchPlanner.thread_cost(free) < StitchPlanner.thread_cost(steps),
+			"the automatic start may work a segment from either end")
 
 
 ## Each start corner begins its first row at that corner and works away from it; changing the
@@ -658,23 +659,21 @@ func _starts(steps: Array[StitchStep]) -> Array[bool]:
 
 func _test_thread_changes() -> void:
 	var pattern := _pattern(["00...00....0", "000........."])
-	# Row 1 touches the first segment of row 0, so it comes before the lone cross at 11; it is
-	# begun at its right end, nearer to that cross.
+	# Row 1 touches the first segment of row 0, so it comes before the lone cross at 11.
 	var unlimited := StitchPlanner.plan(pattern, 0)
 	_check(_starts(unlimited) == [true, false, false, false, false, false, false],
 			"without a limit only the first step starts a thread: %s" % [_starts(unlimited)])
-	_check(unlimited[6].travel_before == 8 and str(unlimited[4]) == "HALF row 1 [2, 1, 0] skip 1",
+	_check(unlimited[6].travel_before == 10 and str(unlimited[4]) == "HALF row 1 [0, 1, 2]",
 			"area first, then the long way: %s" % [_describe(unlimited)])
 
 	# Limit 2: the gap of 3 now splits the row, and every way longer than 2 needs a new thread.
-	# Row 1 from the right reaches 5, 6 within the limit, so only the cross needs a new thread.
 	var limited := StitchPlanner.plan(pattern, 0, true, true, 2)
 	var got := _describe(limited)
-	var expected := ["HALF row 0 [0, 1]", "BACK row 0 [1, 0]", "HALF row 1 [2, 1, 0] skip 1",
-			"BACK row 1 [0, 1, 2]", "HALF row 0 [5, 6] skip 2", "BACK row 0 [6, 5]",
+	var expected := ["HALF row 0 [0, 1]", "BACK row 0 [1, 0]", "HALF row 1 [0, 1, 2]",
+			"BACK row 1 [2, 1, 0]", "HALF row 0 [5, 6] skip 4", "BACK row 0 [6, 5]",
 			"CROSS row 0 [11] skip 5"]
 	_check(got == expected, "limit 2 splits at gap 3: %s" % [got])
-	_check(_starts(limited) == [true, false, false, false, false, false, true],
+	_check(_starts(limited) == [true, false, false, false, true, false, true],
 			"limit 2 thread starts: %s" % [_starts(limited)])
 
 	# The next row directly below is no skip.
@@ -694,8 +693,7 @@ func _test_thread_changes() -> void:
 	_check(session.done_count(0) == 4 and session.current_index(0) == 2,
 			"progress taken over: %d done, next %d" % [session.done_count(0), session.current_index(0)])
 	_check(session.last_cell(0) == Vector2i(0, 0), "needle at the end of the last done step before")
-	_check(session.thread_start(0, 6) == StitchSession.ThreadStart.AUTO
-			and session.thread_start(0, 4) == StitchSession.ThreadStart.NONE, "only step 6 starts a new thread")
+	_check(session.thread_start(0, 4) == StitchSession.ThreadStart.AUTO, "step 4 starts a new thread")
 	_check(session.thread_start(0, 0) == StitchSession.ThreadStart.FIRST, "first step is FIRST")
 	_check(session.thread_start(0, 3) == StitchSession.ThreadStart.NONE, "return pass is no start")
 	session.go_back(0)
@@ -876,7 +874,7 @@ func _test_english() -> void:
 	var got := _describe(StitchPlanner.plan(_pattern(["0000000", "0000000"]), 0, true, true,
 			StitchPlanner.UNLIMITED, true))
 	_check(got == ["CROSS row 0 [0, 1, 2, 3]", "CROSS row 0 [4, 5, 6]",
-			"CROSS row 1 [6, 5, 4, 3]", "CROSS row 1 [2, 1, 0]"], "english rows: %s" % [got])
+			"CROSS row 1 [0, 1, 2, 3] skip 5", "CROSS row 1 [4, 5, 6]"], "english rows from the start side: %s" % [got])
 	var pattern := PatternImporter.from_image(load("res://samples/hypsi_anhaenger.png") as Image, FlossPalette.dmc())
 	var session := StitchSession.new(pattern)
 	session.set_english(true)

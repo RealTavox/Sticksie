@@ -67,11 +67,17 @@ const KICK_BUDGET := 1000000
 const KICKS_PER_AREA := 20
 const KICK_RUN := 6
 const SEED := 20261029
+## Extra cost of a step against the chosen direction (see set_direction()).
+const AGAINST_DIRECTION := 100.0
 ## Smallest gain worth a change, so rounding never makes the search go round in circles.
 const EPSILON := 1.0e-6
 
 var _max_skip: int
 var _start_cost: float
+## Chosen stitching direction (set_direction()): +1 or -1 for rows downwards/upwards and segments
+## to the right/left in a row, 0 for none.
+var _row_step := 0
+var _side_step := 0
 
 # The problem, in flat arrays. Segments, ways and entries are numbered in the order they are added.
 var _seg_area := PackedInt32Array()
@@ -193,6 +199,14 @@ func add_entry(hole: Vector2, inner: float) -> void:
 	_entry_inner.append(inner)
 	_way_entries[-1] += 1
 	_way_alone[-1] = minf(_way_alone[-1], inner)
+
+
+## Keeps a stitching direction: going on to a row against `row_step` (+1: downwards), or within a
+## row against `side_step` (+1: to the right), costs AGAINST_DIRECTION more, so the plan only does
+## it where the rules leave no other way.
+func set_direction(row_step: int, side_step: int) -> void:
+	_row_step = row_step
+	_side_step = side_step
 
 
 ## Segments `a` and `b` touch: in an area, either may be the one that lets the other follow.
@@ -433,6 +447,15 @@ func _cost(from: int, to: int) -> float:
 	_calls += 1
 	if from < 0:
 		return _way_alone[to]
+	if _row_step != 0:
+		var rows := (_way_first[to].y - _way_last[from].y) * _row_step
+		if rows < 0 or (rows == 0 and (_way_first[to].x - _way_last[from].x) * _side_step < 0):
+			return AGAINST_DIRECTION + _plain_cost(from, to)
+	return _plain_cost(from, to)
+
+
+## _cost() without the direction.
+func _plain_cost(from: int, to: int) -> float:
 	if _max_skip >= 0:
 		var gap := (_way_first[to] - _way_last[from]).abs()
 		if maxf(gap.x, gap.y) - 1.0 > _max_skip:

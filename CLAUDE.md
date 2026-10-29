@@ -80,7 +80,8 @@ item is resolved during normal work, delete its entry in the same change.
   and delete questions are ones; opening the file dialog, the project list or the settings closes
   the open touch overlays, menu included, and `main.gd` `_restore_overlays()` opens them again when
   it closes), `ProjectBrowser` the
-  project list: open, rename, delete after a confirmation; the preview comes from
+  project list: open, rename, delete after a confirmation, the open project's row blue like a
+  pressed button; the preview comes from
   `ProjectStore.preview()`, for now the source image, later meant to show the progress), `main.tscn`/`main.gd` the start screen (the settings' collapsible "Entwicklertools", built only when
   `OS.is_debug_build()`, so release exports leave them out, hold the light, the sample image and
   the developer mode, which shows a toggle `RoundButton` without a job yet under the menu button): two layouts
@@ -243,8 +244,11 @@ live in `StitchSession` keyed by (first cell, kind), so they survive replanning;
 limit replans via `StitchSession.set_max_skip()`, which takes progress over from the cells.
 
 Start corner: `Preferences.auto_start()` (default on) starts wherever the thread is shortest
-(`StitchPlanner.plan_shortest()`). Off: `Preferences.top_to_bottom()` / `start_left()` fix the first
-segment (the first in row order from that corner, from that side); the rest is optimised. Changing any of them replans via
+(`StitchPlanner.plan_shortest()`). Off: `Preferences.top_to_bottom()` / `start_left()` keep the user's direction:
+the first segment is the corner's, every segment is worked from the start side, and steps against
+the row order or the side cost `PathOptimizer.AGAINST_DIRECTION` more (`set_direction()`), so they
+only happen where areas and "grow without holes" force them. The settings say that leaving the
+recommended choices (automatic corner, automatic guide, Danish) costs clearly more thread. Changing any of them replans via
 `StitchSession.set_direction()` like the skip limit. Replanning is lazy: `restore()` only keeps the
 cell states, each thread is planned (and takes its progress over) when first needed, so several
 setting changes in a row plan once. `StitchSession.auto_start` is not saved in

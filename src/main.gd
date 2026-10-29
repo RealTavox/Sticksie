@@ -702,6 +702,8 @@ func _build_settings_dialog() -> void:
 	content.add_child(_method_cards)
 	var method_note := _make_note(METHODS[0])
 	content.add_child(method_note)
+	content.add_child(_make_note("Empfohlen: Dänisch."))
+	content.add_child(_make_warning())
 	_method_cards.selected_changed.connect(func(index: int) -> void:
 		method_note.text = METHODS[index]
 		_whole_back_box.disabled = index == 1)
@@ -728,10 +730,11 @@ func _build_settings_dialog() -> void:
 	_corner_picture = SettingPicture.new(SettingPicture.Kind.CORNER, true)
 	content.add_child(_corner_picture)
 	_corner_option.item_selected.connect(func(index: int) -> void: _corner_picture.corner = index)
-	content.add_child(_make_note("Fläche für Fläche: Die Ecke bestimmt, wo es losgeht und welcher Abschnitt "
-			+ "bei gleichem Abstand zuerst kommt. Eine Reihe beginnt trotzdem am näheren Ende, "
-			+ "wenn der Faden dort schon ist. Automatisch probiert jede Farbe in allen vier Ecken "
-			+ "und nimmt die, bei der am wenigsten Faden hinten weiterläuft oder neu nötig ist."))
+	content.add_child(_make_note("Empfohlen: Automatisch. Jede Farbe beginnt dort und läuft so, dass "
+			+ "am wenigsten Faden hinten weiterläuft oder neu nötig ist. Mit einer Ecke geht es dort "
+			+ "los, jede Reihe läuft von dieser Seite aus und die Reihen kommen in dieser Richtung dran "
+			+ "(Fläche für Fläche, so weit es geht)."))
+	content.add_child(_make_warning())
 	content.add_child(HSeparator.new())
 	_build_guide_settings(content)
 	content.add_child(HSeparator.new())
@@ -827,11 +830,12 @@ func _build_guide_settings(content: VBoxContainer) -> void:
 	_guide_picture = SettingPicture.new(SettingPicture.Kind.STITCH_GUIDE, true)
 	content.add_child(_guide_picture)
 	content.add_child(_make_note("Punkt: Die Nadel kommt hoch, Pfeil: bis dahin, Zahl: Reihenfolge, gestrichelt: "
-			+ "der Faden auf der Rückseite. Automatisch: erst /, dann \\. Die Nadel kommt immer so hoch, "
-			+ "dass auf der Rückseite nur kurze senkrechte Stiche bleiben, in beide Richtungen. "
+			+ "der Faden auf der Rückseite. Empfohlen: Automatisch, erst /, dann \\. Die Nadel kommt immer "
+			+ "so hoch, dass auf der Rückseite nur kurze Stiche von einem Loch zum nächsten bleiben. "
 			+ "Fest: jeder Schenkel genau so, wie gewählt. Auf der Rückseite kann der Faden dann "
 			+ "schräg über zwei Felder laufen. Nicht mitten im Projekt wechseln, sonst liegen die "
 			+ "oberen Schenkel nicht mehr gleich."))
+	content.add_child(_make_warning())
 
 
 ## A section title in the settings.
@@ -887,6 +891,14 @@ func _show_dev_tools(open: bool) -> void:
 	_dev_tools_button.set_pressed_no_signal(open)
 	_dev_tools_button.text = ("▾ " if open else "▸ ") + "Entwicklertools"
 	_dev_tools_box.visible = open
+
+
+## The note under the settings that have a recommended choice.
+static func _make_warning() -> Label:
+	var warning := _make_note("Abweichend vom Empfohlenen braucht das Sticken deutlich mehr Faden, "
+			+ "und der Weg ist nicht so gründlich optimiert wie mit der Automatik.", 0.9)
+	warning.add_theme_color_override("font_color", Color(1.0, 0.78, 0.45))
+	return warning
 
 
 ## A wrapped explanation in the settings, faded to `alpha`.

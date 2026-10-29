@@ -82,9 +82,17 @@ func _fill() -> void:
 		_list.add_child(_make_row(entry))
 
 
+## A project's row; the open project's is blue like a pressed button.
 func _make_row(entry: Dictionary) -> Control:
+	var frame := PanelContainer.new()
+	var background := StyleBoxFlat.new()
+	background.set_corner_radius_all(8)
+	background.set_content_margin_all(8)
+	background.bg_color = PRIMARY_COLOR if entry.path == current_path else Color.TRANSPARENT
+	frame.add_theme_stylebox_override("panel", background)
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", 12)
+	frame.add_child(row)
 	var picture := TextureRect.new()
 	picture.custom_minimum_size = PREVIEW_SIZE
 	picture.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
@@ -115,7 +123,7 @@ func _make_row(entry: Dictionary) -> Control:
 		open_requested.emit(entry.path)))
 	row_buttons.add_child(make_button("Umbenennen", ButtonIcons.Icon.PENCIL, _ask_rename.bind(entry)))
 	row_buttons.add_child(make_button("Löschen", ButtonIcons.Icon.TRASH, _ask_delete.bind(entry)))
-	return row
+	return frame
 
 
 func _ask_rename(entry: Dictionary) -> void:
