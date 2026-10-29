@@ -77,10 +77,11 @@ Weitere Regeln:
   Abschnitte. Ist in den Einstellungen ein kleineres Sprung-Limit gewählt, gilt dieses.
 - **Einzelne Stiche:** Ein Abschnitt aus nur einem Stich wird als einzelnes ganzes Kreuz gestickt
   (erst `/`, dann `\`).
-- Jeder Abschnitt beginnt an dem Ende, das der Nadel näher ist (bei gleichem Abstand auf der
-  Startseite); der dänische Rückweg endet wieder dort. Beim Faden zu bleiben ist wichtiger, als
-  jede Reihe in dieselbe Richtung zu sticken. Die Schenkel ändern sich dadurch nicht: Halbstiche
-  sind immer `/`, Gegenstiche immer `\`.
+- Automatisch (Standard) beginnt jeder Abschnitt an dem Ende, das insgesamt am wenigsten Faden
+  kostet; der dänische Rückweg endet wieder dort. Beim Faden zu bleiben ist wichtiger, als jede
+  Reihe in dieselbe Richtung zu sticken. Mit einer gewählten Startecke beginnt dagegen jeder
+  Abschnitt auf der Startseite. Die Schenkel ändern sich dadurch nicht: Halbstiche sind immer `/`,
+  Gegenstiche immer `\`.
 
 ### Reihenfolge: Fläche für Fläche
 
@@ -88,15 +89,19 @@ Weitere Regeln:
   gehören zur selben Fläche, wenn sie sich überlappen oder schräg berühren.
 - Eine Fläche wird **fertig gestickt, bevor die nächste beginnt**.
 - **Die Fläche wächst ohne Löcher:** Als Nächstes kommt nur ein Abschnitt in Frage, der an schon
-  Gesticktes angrenzt, zuerst einer, der an den gerade fertigen Abschnitt grenzt. Es wird also nie
-  eine offene Reihe übersprungen, um später zu ihr zurückzukommen.
-- Unter diesen (und beim Wechsel zur nächsten Fläche) kommt der Abschnitt, der dem letzten Stich
-  am nächsten ist. Bei gleichem Abstand entscheidet die Stickrichtung aus den Einstellungen (Reihe
-  für Reihe, von der Startseite aus).
-- Wirkung im Beispielbild: Mit Sprung-Limit 3 braucht es über alle Farben 53 statt 279 Fäden; ohne
-  Limit läuft der Faden auf der Rückseite insgesamt 1 015 statt 10 227 Felder. Felder, die
-  übersprungen und später nachgeholt werden: 1 statt 243 (nur noch beim Wechsel zwischen zwei
-  kleinen Flächen).
+  Gesticktes angrenzt. Es wird also nie eine offene Reihe übersprungen, um später zu ihr
+  zurückzukommen.
+- **Kürzester Faden:** Innerhalb dieser Regeln plant die App den Weg mit dem wenigsten Faden auf
+  der Rückseite, gemessen von Loch zu Loch: welcher Abschnitt als Nächstes kommt, an welchem Ende
+  er beginnt und durch welches Loch die Nadel zuerst hoch- und zuletzt runtergeht. Nie kommt die
+  Nadel durch das Loch hoch, durch das sie gerade runterging. Kleine Farben werden exakt gelöst,
+  größere fast optimal; der Plan ist bei gleichen Einstellungen immer derselbe.
+- **Startecke** (Einstellung): Automatisch (empfohlen) beginnt jede Farbe dort, wo es am wenigsten
+  Faden kostet. Mit einer gewählten Ecke geht es dort los, jede Reihe läuft von der Startseite aus
+  und die Reihen kommen in der gewählten Richtung dran, soweit Fläche für Fläche es erlaubt. Das
+  kostet mehr Faden.
+- Wirkung im Beispielbild: Ohne Sprung-Limit läuft der Faden auf der Rückseite insgesamt 5 648 statt
+  5 837 Felder (0,1 % über dem rechnerischen Optimum); mit fester Stickführung 6 139 statt 7 676.
 
 ### Smarte Positionshinweise
 
@@ -131,7 +136,8 @@ Umsetzung:
 - **Automatisch nach Sprung-Limit:** In den Einstellungen legt man fest, wie viele Felder der
   Faden auf der Rückseite höchstens überspringen darf. Ist der Weg zum nächsten Schritt länger,
   sagt die App „Neuer Faden: alten Faden unter 3–5 Stichen vernähen, dann neu anfangen“.
-  **Standard: kein Limit**, der Faden wird nie automatisch gewechselt. Gezählt werden die Felder
+  **Standard: 3 Felder** (empfohlen); aus heißt, der Faden wird nie automatisch gewechselt.
+  Gezählt werden die Felder
   zwischen dem letzten Stich und dem nächsten (der direkte Nachbar, auch schräg oder in der
   nächsten Reihe, zählt als 0).
 - Ohne Fadenwechsel nennt die App längere Wege: „Faden auf der Rückseite 4 Felder weiterführen“.
@@ -164,12 +170,15 @@ eine 180°-Drehung des Stoffs; Vorder- und Rückseite entstehen aus demselben Fa
 
 ## 4. Einstellungen
 
-- **Sprung-Limit** für automatische Fadenwechsel (siehe „Faden neu“): aus (Standard) oder eine
-  Anzahl Felder. Üblich sind 2–3. *(umgesetzt)*
-- **Stickrichtung** nach Vorliebe: Reihenfolge der Reihen (oben → unten oder unten → oben) und
-  Startseite (links oder rechts). Bei der Reihenfolge Fläche für Fläche entscheidet sie, wo es
-  losgeht und welcher Abschnitt bei gleichem Abstand zuerst kommt.
-- Richtung des oberen Schenkels.
+- **Sprung-Limit** für automatische Fadenwechsel (siehe „Faden neu“): 3 Felder (Standard), aus
+  oder eine andere Anzahl Felder. *(umgesetzt)*
+- **Stickrichtung** nach Vorliebe: automatisch (Standard) oder eine Startecke, also Reihenfolge der
+  Reihen (oben → unten oder unten → oben) und Startseite (links oder rechts); siehe
+  „Reihenfolge“. *(umgesetzt)*
+- Richtung des oberen Schenkels und wo die Nadel hochkommt (Stickführung): automatisch (Standard)
+  oder fest. *(umgesetzt)*
+- Wer von den empfohlenen Einstellungen abweicht, sieht dort den Hinweis, dass das deutlich mehr
+  Faden braucht und nicht so gründlich optimiert ist wie die Automatik.
 
 ## 5. Plattformen
 
