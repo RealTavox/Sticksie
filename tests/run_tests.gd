@@ -43,12 +43,37 @@ func _initialize() -> void:
 	# The root joins the tree only once the main loop runs; gestures need it for their timers.
 	await process_frame
 	_test_gestures()
+	_test_symbols_replay()
 	await _test_page_swipe()
 	if _failures == 0:
 		print("All tests passed.")
 	else:
 		printerr("%d check(s) failed." % _failures)
 	quit(1 if _failures > 0 else 0)
+
+
+## A tap on a symbol card plays only that card again from its start, also in still mode.
+func _test_symbols_replay() -> void:
+	var session := StitchSession.new(_pattern(["00"]))
+	var symbols := StepSymbols.new()
+	root.add_child(symbols)
+	symbols.still = true
+	symbols.show_step(session.current_step(0), null, StitchStyle.new(), true, true)
+	var views := symbols.get_children()
+	_check(views.size() == 4 and views.all(func(view: Node) -> bool: return is_equal_approx(view.t, 1.0)),
+			"still symbols show every card's last frame")
+	for pressed in [true, false]:
+		var click := InputEventMouseButton.new()
+		click.button_index = MOUSE_BUTTON_LEFT
+		click.pressed = pressed
+		click.position = Vector2(20, 20)
+		views[1]._gui_input(click)
+	_check(views[1].t == 0.0 and is_equal_approx(views[0].t, 1.0) and is_equal_approx(views[3].t, 1.0), "a tapped card starts again")
+	symbols._process(StepSymbols.CARD_SECONDS[StepSymbols.Card.THREAD] / 2.0)
+	_check(is_equal_approx(views[1].t, 0.5) and is_equal_approx(views[0].t, 1.0), "only the tapped card plays")
+	symbols._process(StepSymbols.CARD_SECONDS[StepSymbols.Card.THREAD])
+	_check(views[1].t == 1.0 and symbols._replays.is_empty(), "the replay ends on the last frame")
+	symbols.free()
 
 
 func _check(ok: bool, what: String) -> void:

@@ -104,12 +104,13 @@ item is resolved during normal work, delete its entry in the same change.
   kept with `set_covered()`): white symbols only, a square card per part of the step side by
   side, each animated once, one after the other from left to right (waiting ones faded), then
   standing; redrawn at most 30 times a second while playing: securing the old thread (needle
-  under the back stitches, scissors), threading (the doubled thread through the eye of the
+  under the back stitches, scissors cut and open again, so the still picture shows scissors), threading (the doubled thread through the eye of the
   user's needle, `ButtonIcons.needle_icon(…, true)` flat white), counting (an arrow per
   direction with its count), starting with the loop (side view: the needle goes down through a
   hole and brings the loop, an arch with straight strands into the hole; up through the next
   hole, through the loop, back down the same hole) and the stitch (up hole, down hole, arrow,
-  how many),
+  how many); a tap on a card plays it once more (`replay()`, also as still pictures), and the
+  window takes every tap so none confirms the step behind it,
   `SkeinSwatch` a thread colour drawn as a square of the pure
   colour with a loop of thread coming out of it (one colourless template image per shape,
   tinted by `skein.gdshader`, so it fades as one; tapping it opens the colour picker),
@@ -144,7 +145,7 @@ How to check a change; every fix and feature runs these. Godot binary:
 2. `$G --headless --path . --script res://tests/run_tests.gd`: prints "All tests passed."
    and exits 0. Plain checks without a framework (Lab/CIEDE2000 against Sharma's reference
    pairs, DMC palette, importing the sample, stitch planner incl. that every cell of the sample
-   is crossed exactly once, stitching progress, position hints and their wording, view gestures fed as touch events, incl. the swipe back dragging the page).
+   is crossed exactly once, stitching progress, position hints and their wording, view gestures fed as touch events, incl. the swipe back dragging the page, replaying a tapped symbol card).
 3. `$G --headless --path . --quit-after 120 -- --projects-dir=<scratch dir> --open=res://samples/hypsi_anhaenger.png --stitch=3837 --steps=7 2>&1 | grep -E "ERROR|WARNING"`:
    no output. Always pass `--projects-dir` with a scratch folder: every run that opens an image
    saves a project, and without it that lands in the user's real projects.

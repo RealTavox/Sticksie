@@ -8,7 +8,7 @@ extends Control
 ## count), starting the thread with the loop (down through a hole bringing the loop, up through
 ## the next, through the loop and back down) and the stitch itself (one leg from the hole where the needle comes up to
 ## where it goes down, and how many). Symbols, not pictures: only white lines, dots and numbers
-## on the overlays' see-through grey.
+## on the overlays' see-through grey. A tap on a card plays its animation once more.
 
 enum Card { SECURE, THREAD, ANCHOR, COUNT, STITCH }
 
@@ -17,7 +17,7 @@ const SIDE := 120.0
 const PADDING := 12.0
 const CARD := SIDE - PADDING * 2.0
 ## How long each card's animation takes, in seconds.
-const CARD_SECONDS := {Card.SECURE: 3.0, Card.THREAD: 2.0, Card.ANCHOR: 3.4, Card.COUNT: 1.6,
+const CARD_SECONDS := {Card.SECURE: 3.4, Card.THREAD: 2.0, Card.ANCHOR: 3.4, Card.COUNT: 1.6,
 		Card.STITCH: 1.6}
 ## Cards still waiting for their turn are faded to this.
 const WAITING_ALPHA := 0.35
@@ -46,6 +46,8 @@ var _views: Array[CardView] = []
 var _time := 0.0
 var _since_draw := 0.0
 var _held := false
+## Cards played again after a tap: their index -> seconds into that replay.
+var _replays := {}
 ## COUNT: the counting legs in holes, in order.
 var _legs: Array[Vector2i] = []
 ## STITCH: per leg its up and down hole within the cell (0 or 1 on each axis), and how many
@@ -61,7 +63,8 @@ var _background := OverlayWindow.panel_style()
 func _init() -> void:
 	custom_minimum_size = Vector2.ONE * SIDE
 	size = custom_minimum_size
-	mouse_filter = Control.MOUSE_FILTER_IGNORE
+	# Taps on the window never reach the view behind (they would confirm the step).
+	mouse_filter = Control.MOUSE_FILTER_STOP
 	_needle = ButtonIcons.needle_icon(NEEDLE_TEXTURE_PX, true)
 	_eye_at = (((ButtonIcons.NEEDLE_EYE_FROM.x + ButtonIcons.NEEDLE_EYE_TO.x) / 2.0 - ButtonIcons.NEEDLE_LEFT)
 			/ (ButtonIcons.NEEDLE_RIGHT - ButtonIcons.NEEDLE_LEFT))
@@ -99,6 +102,7 @@ func show_step(step: StitchStep, hint: PositionHint, style: StitchStyle, new_thr
 	_views.clear()
 	for i in _cards.size():
 		var view := CardView.new(self, _cards[i])
+		view.pressed.connect(replay.bind(i))
 		view.position = Vector2(PADDING / 2.0 + i * (CARD + PADDING), PADDING / 2.0)
 		view.size = Vector2.ONE * (CARD + PADDING)
 		add_child(view)
@@ -107,6 +111,7 @@ func show_step(step: StitchStep, hint: PositionHint, style: StitchStyle, new_thr
 	size = custom_minimum_size
 	_time = _start(_cards.size()) if still else 0.0
 	_held = false
+	_replays.clear()
 	_update_views()
 	queue_redraw()
 
@@ -122,6 +127,15 @@ func hold(card: Card, progress: float) -> void:
 		return
 	_time = _start(index) + progress * CARD_SECONDS[card]
 	_held = true
+	_replays.clear()
+	_update_views()
+
+
+## Plays the card at `index` once more from its start (also in still mode), the others stay.
+func replay(index: int) -> void:
+	if index < 0 or index >= _cards.size() or _held:
+		return
+	_replays[index] = 0.0
 	_update_views()
 
 
@@ -135,11 +149,18 @@ func _start(index: int) -> float:
 
 func _process(delta: float) -> void:
 	var total := _start(_cards.size())
-	if _cards.is_empty() or _held or _time >= total or not is_visible_in_tree():
+	if (_cards.is_empty() or _held or (_time >= total and _replays.is_empty())
+			or not is_visible_in_tree()):
 		return
 	_time = minf(_time + delta * speed, total)
+	var ended := _time >= total and _replays.is_empty()
+	for index: int in _replays.keys():
+		_replays[index] += delta * speed
+		if _replays[index] >= CARD_SECONDS[_cards[index]]:
+			_replays.erase(index)
+			ended = true
 	_since_draw += delta
-	if _since_draw >= 1.0 / FRAMES_PER_SECOND or _time >= total:
+	if _since_draw >= 1.0 / FRAMES_PER_SECOND or ended:
 		_since_draw = 0.0
 		_update_views()
 
@@ -149,8 +170,9 @@ func _update_views() -> void:
 	for i in _views.size():
 		var start := _start(i)
 		var view := _views[i]
-		view.waiting = _time < start
-		view.t = clampf((_time - start) / CARD_SECONDS[_cards[i]], 0.0, 1.0)
+		view.waiting = _time < start and not _replays.has(i)
+		var seconds: float = _replays.get(i, _time - start)
+		view.t = clampf(seconds / CARD_SECONDS[_cards[i]], 0.0, 1.0)
 		view.queue_redraw()
 
 
@@ -165,19 +187,33 @@ func _draw() -> void:
 class CardView:
 	extends Control
 
+	signal pressed
+
 	var symbols: StepSymbols
 	var card: Card
 	## How far its animation has got, 0..1, and whether it is still waiting for its turn.
 	var t := 0.0
 	var waiting := true
+	var _press_position := Vector2.ZERO
 
 
 	func _init(p_symbols: StepSymbols, p_card: Card) -> void:
 		symbols = p_symbols
 		card = p_card
-		mouse_filter = Control.MOUSE_FILTER_IGNORE
+		mouse_filter = Control.MOUSE_FILTER_STOP
 		clip_contents = true
 		texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
+
+
+	## A tap (the left button comes from touches too), not a drag.
+	func _gui_input(event: InputEvent) -> void:
+		if not (event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT):
+			return
+		if event.pressed:
+			_press_position = event.position
+		elif event.position.distance_to(_press_position) < 12.0 and Rect2(Vector2.ZERO, size).has_point(event.position):
+			pressed.emit()
+		accept_event()
 
 
 	func _draw() -> void:
@@ -197,15 +233,16 @@ class CardView:
 
 
 	## Securing the thread on the back: the needle slides under three stitches pulling the thread
-	## after it, then scissors snip the rest off and it falls away; the scissors stay.
+	## after it, then scissors snip the rest off and it falls away; the scissors open again and
+	## stay, so the last frame still shows them as scissors.
 	func _draw_secure(box: Rect2, t: float, ink: Color) -> void:
 		var y := box.get_center().y
 		var length := box.size.x * 1.3
-		var head_x := lerpf(box.position.x - length, size.x, _ease(clampf(t / 0.5, 0.0, 1.0)))
+		var head_x := lerpf(box.position.x - length, size.x, _ease(clampf(t / 0.44, 0.0, 1.0)))
 		var eye_x := head_x + symbols._eye_at * length
 		var cut_x := box.position.x + box.size.x * 0.68
 		# The thread from the left to the needle's eye; once cut, the end beyond the cut falls.
-		var fall := clampf((t - 0.76) / 0.16, 0.0, 1.0)
+		var fall := clampf((t - 0.67) / 0.14, 0.0, 1.0)
 		var thread_end := minf(eye_x, size.x)
 		if fall > 0.0:
 			thread_end = cut_x - 1.0
@@ -214,16 +251,17 @@ class CardView:
 			draw_line(Vector2(cut_x + 1.0, y) + drop, Vector2(size.x, y + fall * 6.0) + drop, piece, LINE_WIDTH)
 		if thread_end > 0.0:
 			draw_line(Vector2(0.0, y), Vector2(thread_end, y), ink, LINE_WIDTH)
-		if t < 0.5:
+		if t < 0.44:
 			_draw_needle(Vector2(head_x, y), 0.0, length, ink)
 		# The stitches on the back, on top of needle and thread.
 		for share in [0.14, 0.32, 0.5]:
 			var bar := Rect2(box.position.x + box.size.x * share - 2.5, y - 15.0, 5.0, 30.0)
 			draw_rect(bar.grow(2.5), Color(GAP_COLOR, ink.a))
 			draw_rect(bar, ink)
-		if t >= 0.54:
-			var open := 1.0 - clampf((t - 0.66) / 0.1, 0.0, 1.0)
-			var shown := clampf((t - 0.54) / 0.08, 0.0, 1.0)
+		if t >= 0.48:
+			# Closed for the cut, then open again.
+			var open := 1.0 - clampf((t - 0.58) / 0.09, 0.0, 1.0) + _ease(clampf((t - 0.8) / 0.14, 0.0, 1.0))
+			var shown := clampf((t - 0.48) / 0.07, 0.0, 1.0)
 			_draw_scissors(Vector2(cut_x + 13.0, y), deg_to_rad(lerpf(3.0, 26.0, open)), Color(ink, ink.a * shown))
 
 
