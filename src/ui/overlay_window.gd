@@ -128,6 +128,11 @@ func is_open() -> bool:
 	return _open
 
 
+## Scrolls the content `pixels` down (for screenshots).
+func scroll_to(pixels: int) -> void:
+	_scroll.scroll_vertical = pixels
+
+
 func is_animating() -> bool:
 	return _waiting or (_tween != null and _tween.is_running())
 

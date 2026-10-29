@@ -62,10 +62,6 @@ const LEG_ORDERS := ["Erst / dann \\", "Erst \\ dann /"]
 const NEEDLE_STARTS := ["Nadel immer unten hoch (Schenkel von unten nach oben)",
 		"Nadel immer oben hoch (Schenkel von oben nach unten)"]
 const CREDIT := "Garnfarben: craft-color-codes von MakeBead (makebead.com), CC BY 4.0"
-const UI_MODES := [
-	"Touch: Muster über den ganzen Bildschirm, runde Knöpfe und Gesten",
-	"Desktop: Werkzeugleiste oben, Seitenleiste daneben",
-]
 ## Touch layout: round button size, distance from the screen edge (inside the safe area), and
 ## overlay panel width on wide screens.
 const ROUND_BUTTON_PX := 72.0
@@ -121,11 +117,15 @@ var _hidden_overlays: Array[Array] = []
 var _limit_box: CheckBox
 var _corner_option: OptionButton
 var _limit_spin: SpinBox
-var _method_option: OptionButton
+var _method_cards: ChoiceCards
+## Pictures under the settings that follow their choice, and the symbol window's preview with its tip.
+var _corner_picture: SettingPicture
+var _guide_picture: SettingPicture
+var _limit_picture: SettingPicture
+var _symbols_preview: StepSymbols
+var _symbols_tip: Label
 var _whole_back_box: CheckBox
 var _block_spin: SpinBox
-var _advanced_button: Button
-var _advanced_box: VBoxContainer
 ## Entwicklertools in the settings, only in debug builds: the light, the sample image and the
 ## developer mode.
 var _dev_tools_button: Button
@@ -166,7 +166,7 @@ var _text_content: VBoxContainer
 var _menu_button: RoundButton
 var _list_button: RoundButton
 var _text_button: RoundButton
-var _ui_option: OptionButton
+var _ui_cards: ChoiceCards
 var _view: PatternView
 var _light_azimuth: HSlider
 var _light_elevation: HSlider
@@ -668,7 +668,9 @@ func _loop_light(on: bool) -> void:
 
 
 ## The settings window. Übernehmen stores them; closing it any other way leaves them as they
-## were and puts the saved light back (the sliders show theirs right away).
+## were and puts the saved light back (the sliders show theirs right away). Choices with two
+## sides are big picture cards (ChoiceCards); the other settings show a picture of what they do
+## under them (SettingPicture), and the symbol window's settings play all its cards.
 func _build_settings_dialog() -> void:
 	_settings_dialog = OverlayWindow.new("Einstellungen")
 	_settings_dialog.buttons.add_child(OverlayWindow.make_button("Abbrechen", ButtonIcons.Icon.CLOSE,
@@ -682,18 +684,23 @@ func _build_settings_dialog() -> void:
 		_restore_overlays())
 	add_child(_settings_dialog)
 	var content := _settings_dialog.content
-	var ui_label := Label.new()
-	ui_label.text = "Bedienung:"
-	content.add_child(ui_label)
-	_ui_option = _make_option(UI_MODES)
-	content.add_child(_ui_option)
+	content.add_theme_constant_override("separation", 8)
+	content.add_child(_make_heading("Bedienung"))
+	_ui_cards = ChoiceCards.new([["Touch", SettingPicture.Kind.TOUCH],
+			["Maus + Tastatur", SettingPicture.Kind.MOUSE_KEYBOARD]])
+	content.add_child(_ui_cards)
 	content.add_child(HSeparator.new())
-	var method_label := Label.new()
-	method_label.text = "Stichmethode:"
-	content.add_child(method_label)
-	_method_option = _make_option(METHODS)
-	_method_option.item_selected.connect(func(index: int) -> void: _whole_back_box.disabled = index == 1)
-	content.add_child(_method_option)
+	_build_symbol_settings(content)
+	content.add_child(HSeparator.new())
+	content.add_child(_make_heading("Stichmethode"))
+	_method_cards = ChoiceCards.new([["Dänisch", SettingPicture.Kind.DANISH],
+			["Englisch", SettingPicture.Kind.ENGLISH]])
+	content.add_child(_method_cards)
+	var method_note := _make_note(METHODS[0])
+	content.add_child(method_note)
+	_method_cards.selected_changed.connect(func(index: int) -> void:
+		method_note.text = METHODS[index]
+		_whole_back_box.disabled = index == 1)
 	_whole_back_box = CheckBox.new()
 	_whole_back_box.text = "Dänisch: Rückweg in einem Zug bis zur nächsten Lücke (statt in Blöcken)"
 	_whole_back_box.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -711,16 +718,20 @@ func _build_settings_dialog() -> void:
 	block_unit.text = "Stiche pro Block (üblich: 5)"
 	block_row.add_child(block_unit)
 	content.add_child(HSeparator.new())
-	var corner_label := Label.new()
-	corner_label.text = "Anfangen in der Ecke:"
-	content.add_child(corner_label)
+	content.add_child(_make_heading("Anfangen in der Ecke"))
 	_corner_option = _make_option(START_CORNERS.map(func(corner: Array) -> String: return corner[0]))
 	content.add_child(_corner_option)
+	_corner_picture = SettingPicture.new(SettingPicture.Kind.CORNER, true)
+	content.add_child(_corner_picture)
+	_corner_option.item_selected.connect(func(index: int) -> void: _corner_picture.corner = index)
 	content.add_child(_make_note("Fläche für Fläche: Die Ecke bestimmt, wo es losgeht und welcher Abschnitt "
 			+ "bei gleichem Abstand zuerst kommt. Eine Reihe beginnt trotzdem am näheren Ende, "
 			+ "wenn der Faden dort schon ist. Automatisch probiert jede Farbe in allen vier Ecken "
 			+ "und nimmt die, bei der am wenigsten Faden hinten weiterläuft oder neu nötig ist."))
 	content.add_child(HSeparator.new())
+	_build_guide_settings(content)
+	content.add_child(HSeparator.new())
+	content.add_child(_make_heading("Fadenwechsel"))
 	_limit_box = CheckBox.new()
 	_limit_box.text = "Faden automatisch wechseln, wenn er auf der Rückseite mehr als"
 	_limit_box.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -735,43 +746,39 @@ func _build_settings_dialog() -> void:
 	var unit := Label.new()
 	unit.text = "Felder überspringen müsste."
 	row.add_child(unit)
+	_limit_picture = SettingPicture.new(SettingPicture.Kind.THREAD_LIMIT, true)
+	content.add_child(_limit_picture)
 	content.add_child(_make_note("Aus: Der Faden wird nie automatisch gewechselt, er darf beliebig weit springen. "
 			+ "Üblich sind 2–3 Felder: längere Fäden auf der Rückseite verhaken sich und scheinen durch. "
 			+ "Einen neuen Faden kannst du beim Sticken jederzeit selbst nehmen."))
-	_limit_box.toggled.connect(func(on: bool) -> void: _limit_spin.editable = on)
-	content.add_child(HSeparator.new())
-	_build_advanced_settings(content)
+	_limit_box.toggled.connect(func(on: bool) -> void:
+		_limit_spin.editable = on
+		_limit_picture.limit_on = on)
+	var light_row := _make_light_row()
+	if OS.is_debug_build():
+		_build_dev_tools(content, light_row)
 
 
-## The advanced part, closed at first so the window stays short: how each cross is worked, and the
-## symbol window.
-func _build_advanced_settings(content: VBoxContainer) -> void:
-	_advanced_button = _make_section_button(_show_advanced)
-	content.add_child(_advanced_button)
-	_advanced_box = VBoxContainer.new()
-	content.add_child(_advanced_box)
-	_advanced_box.add_child(_make_note("Stichführung (welcher Schenkel zuerst, wo die Nadel hochkommt):", 1.0))
-	_needle_option = _make_option(NEEDLE_MODES)
-	_needle_option.item_selected.connect(func(_index: int) -> void: _update_needle_options())
-	_advanced_box.add_child(_needle_option)
-	_leg_option = _make_option(LEG_ORDERS)
-	_advanced_box.add_child(_leg_option)
-	_needle_start_option = _make_option(NEEDLE_STARTS)
-	_advanced_box.add_child(_needle_start_option)
+## The symbol window: on or off, still pictures or how fast; while on, every card plays here once
+## at the chosen tempo (a tap plays one again).
+func _build_symbol_settings(content: VBoxContainer) -> void:
+	content.add_child(_make_heading("Symbolfenster"))
 	_symbols_box = CheckBox.new()
-	_symbols_box.text = "Symbolfenster beim Sticken (Zählen, Stich, Einfädeln, Vernähen)"
+	_symbols_box.text = "Beim Sticken Symbole zeigen (Vernähen, Einfädeln, Zählen, Anfangen, Stich)"
 	_symbols_box.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_advanced_box.add_child(_make_note("Automatisch: erst /, dann \\. Die Nadel kommt immer so hoch, dass auf der "
-			+ "Rückseite nur kurze senkrechte Stiche bleiben, in beide Richtungen. "
-			+ "Fest: jeder Schenkel genau so, wie gewählt. Auf der Rückseite kann der Faden dann "
-			+ "schräg über zwei Felder laufen. Nicht mitten im Projekt wechseln, sonst liegen die "
-			+ "oberen Schenkel nicht mehr gleich."))
-	_advanced_box.add_child(HSeparator.new())
-	_advanced_box.add_child(_symbols_box)
+	content.add_child(_symbols_box)
+	var preview_row := CenterContainer.new()
+	content.add_child(preview_row)
+	_symbols_preview = StepSymbols.new()
+	preview_row.add_child(_symbols_preview)
+	preview_row.resized.connect(func() -> void: _symbols_preview.max_width = preview_row.size.x)
+	_symbols_tip = _make_note("Tippe auf ein Symbol, um es noch einmal abzuspielen.")
+	_symbols_tip.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	content.add_child(_symbols_tip)
 	_symbols_still_box = CheckBox.new()
-	_symbols_still_box.text = "Symbole als Standbild (gleich das fertige Bild, ohne Animation)"
+	_symbols_still_box.text = "Als Standbild (gleich das fertige Bild, ohne Animation)"
 	_symbols_still_box.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_advanced_box.add_child(_symbols_still_box)
+	content.add_child(_symbols_still_box)
 	var speed_row := HBoxContainer.new()
 	var speed_label := Label.new()
 	speed_label.text = "Tempo der Animationen:"
@@ -779,17 +786,56 @@ func _build_advanced_settings(content: VBoxContainer) -> void:
 	_symbols_speed_option = _make_option(SYMBOL_SPEEDS.map(func(speed: Array) -> String: return speed[0]))
 	_symbols_speed_option.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	speed_row.add_child(_symbols_speed_option)
-	_advanced_box.add_child(speed_row)
-	# Without the window, or as still pictures, the other symbol settings don't count.
-	var update_symbol_options := func(_on: bool) -> void:
-		_symbols_still_box.disabled = not _symbols_box.button_pressed
-		_symbols_speed_option.disabled = not _symbols_box.button_pressed or _symbols_still_box.button_pressed
-	_symbols_box.toggled.connect(update_symbol_options)
-	_symbols_still_box.toggled.connect(update_symbol_options)
-	_show_advanced(false)
-	var light_row := _make_light_row()
-	if OS.is_debug_build():
-		_build_dev_tools(content, light_row)
+	content.add_child(speed_row)
+	_symbols_box.toggled.connect(func(_on: bool) -> void: _update_symbol_options(true))
+	_symbols_still_box.toggled.connect(func(_on: bool) -> void: _update_symbol_options(true))
+	_symbols_speed_option.item_selected.connect(func(_index: int) -> void: _update_symbol_options(true))
+
+
+## Greys out what doesn't count (without the window, or as still pictures) and shows the preview
+## as chosen; `replay` plays it from the start.
+func _update_symbol_options(replay: bool) -> void:
+	var on := _symbols_box.button_pressed
+	_symbols_still_box.disabled = not on
+	_symbols_speed_option.disabled = not on or _symbols_still_box.button_pressed
+	_symbols_preview.get_parent().visible = on
+	_symbols_tip.visible = on
+	_symbols_preview.speed = SYMBOL_SPEEDS[_symbols_speed_option.selected][1]
+	_symbols_preview.still = _symbols_still_box.button_pressed
+	if on and replay:
+		_symbols_preview.show_preview()
+
+
+## How each cross is worked: automatic or fixed leg order and needle start, with a Danish pass
+## over two cells worked that way.
+func _build_guide_settings(content: VBoxContainer) -> void:
+	content.add_child(_make_heading("Stickführung"))
+	content.add_child(_make_note("Welcher Schenkel zuerst, wo die Nadel hochkommt:", 1.0))
+	_needle_option = _make_option(NEEDLE_MODES)
+	_needle_option.item_selected.connect(func(_index: int) -> void: _update_needle_options())
+	content.add_child(_needle_option)
+	_leg_option = _make_option(LEG_ORDERS)
+	_leg_option.item_selected.connect(func(_index: int) -> void: _update_needle_options())
+	content.add_child(_leg_option)
+	_needle_start_option = _make_option(NEEDLE_STARTS)
+	_needle_start_option.item_selected.connect(func(_index: int) -> void: _update_needle_options())
+	content.add_child(_needle_start_option)
+	_guide_picture = SettingPicture.new(SettingPicture.Kind.STITCH_GUIDE, true)
+	content.add_child(_guide_picture)
+	content.add_child(_make_note("Punkt: Die Nadel kommt hoch, Pfeil: bis dahin, Zahl: Reihenfolge, gestrichelt: "
+			+ "der Faden auf der Rückseite. Automatisch: erst /, dann \\. Die Nadel kommt immer so hoch, "
+			+ "dass auf der Rückseite nur kurze senkrechte Stiche bleiben, in beide Richtungen. "
+			+ "Fest: jeder Schenkel genau so, wie gewählt. Auf der Rückseite kann der Faden dann "
+			+ "schräg über zwei Felder laufen. Nicht mitten im Projekt wechseln, sonst liegen die "
+			+ "oberen Schenkel nicht mehr gleich."))
+
+
+## A section title in the settings.
+static func _make_heading(text: String) -> Label:
+	var heading := Label.new()
+	heading.text = text
+	heading.add_theme_font_size_override("font_size", 17)
+	return heading
 
 
 ## Tools for development, closed at first: the light, the sample image and the developer mode.
@@ -848,17 +894,20 @@ static func _make_note(text: String, alpha := 0.7) -> Label:
 	return note
 
 
-func _show_advanced(open: bool) -> void:
-	_advanced_button.set_pressed_no_signal(open)
-	_advanced_button.text = ("▾ " if open else "▸ ") + "Erweitert"
-	_advanced_box.visible = open
-
-
-## Leg order and needle start only count for a fixed style.
+## Leg order and needle start only count for a fixed style; the picture shows the style chosen.
 func _update_needle_options() -> void:
 	var fixed := _needle_option.selected == 1
 	_leg_option.disabled = not fixed
 	_needle_start_option.disabled = not fixed
+	_guide_picture.style = _chosen_style()
+
+
+## The stitch style as the settings window shows it.
+func _chosen_style() -> StitchStyle:
+	if _needle_option.selected == 0:
+		return StitchStyle.new()
+	return StitchStyle.create(StitchStyle.Needle.FROM_TOP if _needle_start_option.selected == 1
+			else StitchStyle.Needle.FROM_BOTTOM, _leg_option.selected == 0)
 
 
 func _make_option(items: Array) -> OptionButton:
@@ -1136,22 +1185,24 @@ func _show_open_image() -> void:
 
 
 func _show_settings() -> void:
-	_ui_option.selected = 0 if Preferences.touch_mode() else 1
+	_ui_cards.selected = 0 if Preferences.touch_mode() else 1
 	var limit := Preferences.max_skip()
 	_limit_box.button_pressed = limit != StitchPlanner.UNLIMITED
 	_limit_spin.editable = _limit_box.button_pressed
+	_limit_picture.limit_on = _limit_box.button_pressed
 	if limit != StitchPlanner.UNLIMITED:
 		_limit_spin.value = limit
 	_corner_option.selected = _corner_index(Preferences.top_to_bottom(), Preferences.start_left(),
 			Preferences.auto_start())
-	_method_option.selected = 1 if Preferences.english() else 0
+	_corner_picture.corner = _corner_option.selected
+	_method_cards.selected = 1 if Preferences.english() else 0
+	_method_cards.selected_changed.emit(_method_cards.selected)
 	_whole_back_box.button_pressed = Preferences.whole_back()
 	_symbols_box.button_pressed = Preferences.step_symbols()
 	_symbols_still_box.button_pressed = Preferences.step_symbols_still()
 	var speeds: Array = SYMBOL_SPEEDS.map(func(speed: Array) -> float: return speed[1])
 	_symbols_speed_option.selected = maxi(speeds.find(Preferences.step_symbols_speed()), 0)
-	_symbols_still_box.disabled = not _symbols_box.button_pressed
-	_symbols_speed_option.disabled = not _symbols_box.button_pressed or _symbols_still_box.button_pressed
+	_update_symbol_options(true)
 	_whole_back_box.disabled = Preferences.english()
 	_block_spin.value = Preferences.max_block()
 	_needle_option.selected = 1 if Preferences.needle_fixed() else 0
@@ -1176,14 +1227,14 @@ func _apply_settings() -> void:
 	if _dev_mode_box != null:
 		Preferences.set_developer_mode(_dev_mode_box.button_pressed)
 		_dev_button.visible = Preferences.developer_mode()
-	if (_ui_option.selected == 0) != Preferences.touch_mode():
-		Preferences.set_touch_mode(_ui_option.selected == 0)
+	if (_ui_cards.selected == 0) != Preferences.touch_mode():
+		Preferences.set_touch_mode(_ui_cards.selected == 0)
 		_apply_ui_mode()
 	var limit := int(_limit_spin.value) if _limit_box.button_pressed else StitchPlanner.UNLIMITED
 	Preferences.set_max_skip(limit)
 	var corner: Array = START_CORNERS[_corner_option.selected]
 	Preferences.set_direction(corner[1], corner[2], corner[3])
-	Preferences.set_english(_method_option.selected == 1)
+	Preferences.set_english(_method_cards.selected == 1)
 	Preferences.set_whole_back(_whole_back_box.button_pressed)
 	Preferences.set_step_symbols(_symbols_box.button_pressed)
 	Preferences.set_step_symbols_still(_symbols_still_box.button_pressed)
@@ -1755,6 +1806,7 @@ func _handle_cmdline() -> void:
 	var finale := false
 	var dismiss := false
 	var wait := 0.0
+	var scroll := 0
 	var symbols_card := PackedStringArray()
 	for arg in OS.get_cmdline_user_args():
 		if arg.begins_with("--open="):
@@ -1765,8 +1817,6 @@ func _handle_cmdline() -> void:
 			steps = arg.trim_prefix("--steps=").to_int()
 		elif arg == "--settings":
 			_show_settings.call_deferred()
-		elif arg == "--advanced":
-			_show_advanced.call_deferred(true)
 		elif arg == "--dev-tools":
 			_show_dev_tools.call_deferred(true)
 		elif arg.begins_with("--dev="):
@@ -1809,6 +1859,8 @@ func _handle_cmdline() -> void:
 			finale = true
 		elif arg == "--dismiss":
 			dismiss = true
+		elif arg.begins_with("--scroll="):
+			scroll = arg.trim_prefix("--scroll=").to_int()
 		elif arg.begins_with("--wait="):
 			wait = arg.trim_prefix("--wait=").to_float()
 		elif arg.begins_with("--zoom="):
@@ -1920,6 +1972,10 @@ func _handle_cmdline() -> void:
 	else:
 		while _progress.is_filling():
 			await get_tree().process_frame
+	if scroll > 0:
+		for window: OverlayWindow in [_settings_dialog, _project_browser]:
+			if window.is_open():
+				window.scroll_to(scroll)
 	for i in 3:
 		await get_tree().process_frame
 	# Low processor mode draws only when something changed, so ask for one more frame.

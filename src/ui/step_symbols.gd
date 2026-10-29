@@ -39,6 +39,11 @@ var still := false:
 			_update_views()
 ## How much faster than normal the animations play.
 var speed := 1.0
+## Widest the window may get; more cards go on further rows (0: one row however wide).
+var max_width := 0.0:
+	set(value):
+		max_width = value
+		_lay_out()
 
 var _cards: Array[Card] = []
 var _views: Array[CardView] = []
@@ -91,29 +96,65 @@ func show_step(step: StitchStep, hint: PositionHint, style: StitchStyle, new_thr
 		if new_thread:
 			_cards.append(Card.ANCHOR)
 		_cards.append(Card.STITCH)
-		_stitch_legs.clear()
-		var holes := style.needle_holes(step)
-		var cell := Vector2(step.cells[0], step.row)
-		for i in (2 if step.kind == StitchStep.Kind.CROSS else 1):
-			_stitch_legs.append(PackedVector2Array([holes[i * 2] - cell, holes[i * 2 + 1] - cell]))
-		_stitch_count = step.cells.size()
+		_set_stitch(step, style)
+	_build_views()
+
+
+## Every card with made-up numbers, for the settings: how the window looks and how fast it plays.
+func show_preview() -> void:
+	_cards = [Card.SECURE, Card.THREAD, Card.COUNT, Card.ANCHOR, Card.STITCH]
+	_legs = [Vector2i(3, 0), Vector2i(0, 2)]
+	_set_stitch(StitchStep.new(StitchStep.Kind.CROSS, 0, 0, PackedInt32Array([0]), 0), StitchStyle.new())
+	_stitch_count = 5
+	_build_views()
+
+
+## The STITCH card's legs within the first cell of `step`, and how many stitches it has.
+func _set_stitch(step: StitchStep, style: StitchStyle) -> void:
+	_stitch_legs.clear()
+	var holes := style.needle_holes(step)
+	var cell := Vector2(step.cells[0], step.row)
+	for i in (2 if step.kind == StitchStep.Kind.CROSS else 1):
+		_stitch_legs.append(PackedVector2Array([holes[i * 2] - cell, holes[i * 2 + 1] - cell]))
+	_stitch_count = step.cells.size()
+
+
+## A view per card, played from the start.
+func _build_views() -> void:
 	for view in _views:
 		view.queue_free()
 	_views.clear()
 	for i in _cards.size():
 		var view := CardView.new(self, _cards[i])
 		view.pressed.connect(replay.bind(i))
-		view.position = Vector2(PADDING / 2.0 + i * (CARD + PADDING), PADDING / 2.0)
 		view.size = Vector2.ONE * (CARD + PADDING)
 		add_child(view)
 		_views.append(view)
-	custom_minimum_size = Vector2(PADDING + maxi(_cards.size(), 1) * (CARD + PADDING), SIDE)
-	size = custom_minimum_size
+	_lay_out()
 	_time = _start(_cards.size()) if still else 0.0
 	_held = false
 	_replays.clear()
 	_update_views()
 	queue_redraw()
+
+
+## Cards in rows as wide as `max_width` allows, the window round them.
+func _lay_out() -> void:
+	var columns := _columns()
+	for i in _views.size():
+		_views[i].position = Vector2(PADDING / 2.0 + (i % columns) * (CARD + PADDING),
+				PADDING / 2.0 + (i / columns) * (CARD + PADDING))
+	var rows := ceili(maxi(_cards.size(), 1) / float(columns))
+	custom_minimum_size = Vector2(PADDING + mini(maxi(_cards.size(), 1), columns) * (CARD + PADDING),
+			PADDING + rows * (CARD + PADDING))
+	size = custom_minimum_size
+	queue_redraw()
+
+
+func _columns() -> int:
+	if max_width <= 0.0:
+		return maxi(_cards.size(), 1)
+	return clampi(floori((max_width - PADDING) / (CARD + PADDING)), 1, maxi(_cards.size(), 1))
 
 
 func has_cards() -> bool:
@@ -178,9 +219,46 @@ func _update_views() -> void:
 
 func _draw() -> void:
 	draw_style_box(_background, Rect2(Vector2.ZERO, size))
-	for i in range(1, _cards.size()):
-		var x := PADDING / 2.0 + i * (CARD + PADDING)
-		draw_line(Vector2(x, PADDING * 1.5), Vector2(x, size.y - PADDING * 1.5), Color(1, 1, 1, 0.15), 1.0)
+	var columns := _columns()
+	for i in _cards.size():
+		if i % columns == 0:
+			continue
+		var x := PADDING / 2.0 + (i % columns) * (CARD + PADDING)
+		var top := PADDING / 2.0 + (i / columns) * (CARD + PADDING)
+		draw_line(Vector2(x, top + PADDING), Vector2(x, top + CARD), Color(1, 1, 1, 0.15), 1.0)
+
+
+## Scissors drawn on `canvas` pointing along `direction` with their pivot at `pivot`, the blades
+## `angle` apart from the middle, `scale` times the size on the cards.
+static func draw_scissors(canvas: CanvasItem, pivot: Vector2, direction: Vector2, angle: float, ink: Color,
+		scale := 1.0) -> void:
+	for side in [-1.0, 1.0]:
+		var blade := direction.rotated(side * angle) * scale
+		var normal := blade.orthogonal()
+		canvas.draw_colored_polygon(PackedVector2Array([pivot + normal * 3.0, pivot - normal * 3.0,
+				pivot + blade * 26.0]), ink)
+		canvas.draw_line(pivot, pivot - blade * 9.0, ink, 3.0 * scale)
+		canvas.draw_arc(pivot - blade * 14.0, 5.0 * scale, 0.0, TAU, 20, ink, LINE_WIDTH)
+	canvas.draw_circle(pivot, 2.0 * scale, Color(GAP_COLOR, ink.a))
+
+
+## An arrow on `canvas` from `from` to `to`, its head at `to`.
+static func draw_arrow(canvas: CanvasItem, from: Vector2, to: Vector2, ink: Color, width := LINE_WIDTH) -> void:
+	var length := from.distance_to(to)
+	if length < 1.0:
+		return
+	var direction := (to - from) / length
+	var head := minf(9.0, length)
+	canvas.draw_line(from, to - direction * head * 0.7, ink, width)
+	var side := direction.orthogonal() * head * 0.6
+	canvas.draw_colored_polygon(PackedVector2Array([to, to - direction * head + side, to - direction * head - side]), ink)
+
+
+## `text` on `canvas` centred on `center`.
+static func draw_label(canvas: CanvasItem, font: Font, center: Vector2, text: String, font_size: int, ink: Color) -> void:
+	var text_size := font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size)
+	canvas.draw_string(font, center + Vector2(-text_size.x / 2.0, font.get_ascent(font_size) - text_size.y / 2.0),
+			text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, ink)
 
 
 ## One card, cut off at its edges, so a needle sliding in doesn't cross the next card.
@@ -262,19 +340,8 @@ class CardView:
 			# Closed for the cut, then open again.
 			var open := 1.0 - clampf((t - 0.58) / 0.09, 0.0, 1.0) + _ease(clampf((t - 0.8) / 0.14, 0.0, 1.0))
 			var shown := clampf((t - 0.48) / 0.07, 0.0, 1.0)
-			_draw_scissors(Vector2(cut_x + 13.0, y), deg_to_rad(lerpf(3.0, 26.0, open)), Color(ink, ink.a * shown))
-
-
-	## Scissors pointing left with their pivot at `pivot`, the blades `angle` apart from the middle.
-	func _draw_scissors(pivot: Vector2, angle: float, ink: Color) -> void:
-		for side in [-1.0, 1.0]:
-			var blade := Vector2.LEFT.rotated(side * angle)
-			var normal := blade.orthogonal()
-			draw_colored_polygon(PackedVector2Array([pivot + normal * 3.0, pivot - normal * 3.0,
-					pivot + blade * 26.0]), ink)
-			draw_line(pivot, pivot - blade * 9.0, ink, 3.0)
-			draw_arc(pivot - blade * 14.0, 5.0, 0.0, TAU, 20, ink, LINE_WIDTH)
-		draw_circle(pivot, 2.0, Color(GAP_COLOR, ink.a))
+			StepSymbols.draw_scissors(self, Vector2(cut_x + 13.0, y), Vector2.LEFT, deg_to_rad(lerpf(3.0, 26.0, open)),
+					Color(ink, ink.a * shown))
 
 
 	## Threading: the needle stands with its eye at the top, the doubled thread comes in from the left
@@ -335,7 +402,7 @@ class CardView:
 				var share := float(hole + 1) / dots
 				if grown >= share:
 					draw_circle(from.lerp(to, share), 3.5, ink)
-			_draw_arrow(from, from.lerp(to, grown), ink)
+			StepSymbols.draw_arrow(self, from, from.lerp(to, grown), ink)
 			var shown := clampf((t - (i + 1) * span) / 0.1, 0.0, 1.0)
 			if shown <= 0.0:
 				continue
@@ -351,7 +418,7 @@ class CardView:
 			var text := str(maxi(absi(symbols._legs[i].x), absi(symbols._legs[i].y)))
 			var text_size := font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, FONT_SIZE)
 			var center := from.lerp(to, 0.5) + side * (6.0 + (text_size.x if side.y == 0.0 else text_size.y) / 2.0)
-			_draw_text(font, center, text, FONT_SIZE, Color(ink, ink.a * shown))
+			StepSymbols.draw_label(self, font, center, text, FONT_SIZE, Color(ink, ink.a * shown))
 
 
 	## One stitch in a cell: the needle comes up at a dot, the leg grows to where it goes down (a
@@ -373,28 +440,11 @@ class CardView:
 			var grown := clampf((t - starts[i] - 0.08) / 0.27, 0.0, 1.0)
 			var direction := (down - up).normalized()
 			if grown > 0.0:
-				_draw_arrow(up + direction * 7.0, (up + direction * 7.0).lerp(down - direction * 9.0, grown), ink)
+				StepSymbols.draw_arrow(self, up + direction * 7.0, (up + direction * 7.0).lerp(down - direction * 9.0, grown), ink)
 			if grown >= 1.0:
 				draw_arc(down, 6.0, 0.0, TAU, 20, ink, 2.0)
 		var right := Rect2(cell.end.x, box.position.y, box.end.x - cell.end.x, box.size.y)
-		_draw_text(get_theme_default_font(), right.get_center(), "%d×" % symbols._stitch_count, FONT_SIZE + 2, ink)
-
-
-	func _draw_arrow(from: Vector2, to: Vector2, ink: Color) -> void:
-		var length := from.distance_to(to)
-		if length < 1.0:
-			return
-		var direction := (to - from) / length
-		var head := minf(9.0, length)
-		draw_line(from, to - direction * head * 0.7, ink, LINE_WIDTH)
-		var side := direction.orthogonal() * head * 0.6
-		draw_colored_polygon(PackedVector2Array([to, to - direction * head + side, to - direction * head - side]), ink)
-
-
-	func _draw_text(font: Font, center: Vector2, text: String, font_size: int, ink: Color) -> void:
-		var text_size := font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size)
-		draw_string(font, center + Vector2(-text_size.x / 2.0, font.get_ascent(font_size) - text_size.y / 2.0),
-				text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, ink)
+		StepSymbols.draw_label(self, get_theme_default_font(), right.get_center(), "%d×" % symbols._stitch_count, FONT_SIZE + 2, ink)
 
 
 	## Slow at both ends.

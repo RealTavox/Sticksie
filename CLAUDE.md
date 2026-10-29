@@ -21,11 +21,11 @@ item is resolved during normal work, delete its entry in the same change.
 - Project code: `src/` (`project/` saving: `StitchProject` and its JSON format, `ProjectStore`
   files in `user://projects/` (list with preview picture, rename, delete) and the last opened project, `Preferences` app-wide settings in
   `settings.cfg` next to the projects (light direction and height in section `view`, default from the top left at 55°, set in the
-  developer tools; skip limit, start corner or automatic, stitch method, block size, the advanced
+  developer tools; skip limit, start corner or automatic, stitch method, block size, the
   stitch style; not saved in the project file, pushed into the open project; plus the touch or
   desktop layout in section `ui`, default touch on mobile, and which touch panels are open while
   stitching, closed until opened, then as left, and whether the symbol window shows, default on,
-  switched in the advanced settings, as still pictures (the last frames) or animated, and how
+  switched in the settings, as still pictures (the last frames) or animated, and how
   fast; developer mode in section `dev`, only honoured in
   debug builds); `palette/` thread colours and Lab matching, `pattern/` the `Pattern`
   resource, `import/` PNG → pattern, `planner/` Danish stitch order (`StitchPlanner` →
@@ -66,6 +66,14 @@ item is resolved during normal work, delete its entry in the same change.
   `RoundButton` the round see-through touch buttons (lit by `round_button.gdshader` from the
   same light as the fabric, `tint_color` when on: the block colour while stitching, blue in the overview, symbols from `ButtonIcons` distance functions, tooltip on long press; `ButtonIcons.button_icon()`
   draws the same symbols white for ordinary buttons: menu, windows, project list, stitching buttons),
+  the settings window (`main.gd` `_build_settings_dialog()`): sections Bedienung, Symbolfenster
+  (while on, a `StepSymbols.show_preview()` plays every card at the chosen tempo, a tap replays
+  one), Stichmethode, Anfangen in der Ecke, Stickführung, Fadenwechsel, then the developer tools;
+  two-sided choices (layout, method) are `ChoiceCards`, big buttons side by side with a picture
+  over the label, blue when chosen; the start corner, stitch guide and thread limit show a framed
+  `SettingPicture` under them that follows the choice (the guide one draws a Danish pass over two
+  cells with the chosen `StitchStyle`'s holes); both draw white symbols like `StepSymbols`, whose
+  `draw_arrow()`/`draw_scissors()`/`draw_label()` they share,
   `OverlayWindow` the in-app windows in the overlays' look (dark rounded panel, title with a close
   button, scrolling content, buttons at the bottom, over a dimmed screen that takes all input and
   keys; slides up and fades in, back down and out; the settings, the project list and its rename
@@ -156,7 +164,7 @@ How to check a change; every fix and feature runs these. Godot binary:
    --steps=<n>` for the stitching screen after n confirmed steps, `--max-skip=<n>` to set the
    skip limit (-1: none), `--start=<auto|top-left|top-right|bottom-left|bottom-right>` the start corner, `--settings` to open the settings dialog, `--projects` the project list, `--back` the back side while stitching,
    `--method=<danish|english>`, `--back-pass=<whole|blocks>`, `--max-block=<n>`, `--needle=<auto|bottom|top>`, `--first-leg=<slash|backslash>`
-   (both fix the style), `--advanced` / `--dev-tools` with `--settings` for the advanced part / developer tools, `--dev=<on|off>` the developer mode (saved), `--symbols=<on|off|still|animated>` the symbol window or its still pictures (saved) or
+   (both fix the style), `--dev-tools` with `--settings` for the developer tools, `--scroll=<px>` scrolls the open window (settings, project list) that far down before the screenshot, `--dev=<on|off>` the developer mode (saved), `--symbols=<on|off|still|animated>` the symbol window or its still pictures (saved) or
    `--symbols=<secure|thread|anchor|count|stitch>[,<0..1>]` to hold that card at that point of its animation, `--ui=<touch|desktop>` the layout,
    `--overlays=<menu,pin,list,text>` opens touch overlays, `--picker=<code>` the colour picker
    for a colour of the list, `--picker-view=<list,project>` its list view and/or project filter, `--pick=<code>` chooses a colour in it, `--tooltip=<menu|list|text>` shows a
@@ -213,7 +221,7 @@ the guide text (`StitchPanel.describe_corner()`), the needle dot and the back al
 Automatic (default): "/" first, the first leg of a step comes up on the side the step comes
 from, every later leg at the hole nearest to where the needle went down (vertical preferred,
 never the same hole), so Danish passes leave only vertical back stitches in both directions
-(tested on the sample). Fixed (advanced settings): the chosen leg order ("/" or "\" first; cell
+(tested on the sample). Fixed (settings, Stickführung): the chosen leg order ("/" or "\" first; cell
 state `HALF` means the first leg) and always up at the bottom or always at the top.
 
 Thread changes: `StitchStep.travel_before` is the cells skipped on the back from the previous
