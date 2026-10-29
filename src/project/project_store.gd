@@ -6,6 +6,10 @@ class_name ProjectStore
 ## runs point it elsewhere, so they never touch the user's projects.
 static var directory := "user://projects"
 
+## Ends the name of an exported project file. Still a .json, which every device's file picker
+## knows.
+const EXPORT_SUFFIX := ".kreuzstich.json"
+
 
 ## Saves `project`, giving it a new file name on its first save.
 static func save(project: StitchProject) -> Error:
@@ -74,6 +78,21 @@ static func rename(path: String, new_name: String) -> Error:
 	return _write_json(path, data)
 
 
+## The file name an exported project gets: "Hypsi Anhänger" becomes "hypsi_anhaenger.kreuzstich.json".
+static func export_name(project_name: String) -> String:
+	return _slug(project_name) + EXPORT_SUFFIX
+
+
+## A project file someone exported (a saved project's JSON as it is), not yet saved here; null if
+## it isn't a project this app can read. Saving it gives it a file of its own, even if a project
+## of the same name exists.
+static func read_export(bytes: PackedByteArray) -> StitchProject:
+	var json := JSON.new()
+	if json.parse(bytes.get_string_from_utf8()) != OK or not json.data is Dictionary:
+		return null
+	return StitchProject.from_dict(json.data)
+
+
 ## Deletes the project saved at `path` for good; forgets it as the last opened project.
 static func delete(path: String) -> Error:
 	var error := DirAccess.remove_absolute(path)
@@ -124,16 +143,21 @@ static func _read_json(path: String) -> Variant:
 ## A file name from the project name that isn't taken yet: "Hypsi Anhänger" becomes
 ## "hypsi_anhaenger.json", then "hypsi_anhaenger_2.json", …
 static func _new_path(project_name: String) -> String:
-	var slug := ""
-	var name := project_name.to_lower().replace("ä", "ae").replace("ö", "oe").replace("ü", "ue").replace("ß", "ss")
-	for ch in name:
-		slug += ch if (ch >= "a" and ch <= "z") or (ch >= "0" and ch <= "9") else "_"
-	slug = slug.strip_edges().trim_prefix("_").trim_suffix("_")
-	if slug.is_empty():
-		slug = "projekt"
+	var slug := _slug(project_name)
 	var path := directory.path_join(slug + ".json")
 	var number := 2
 	while FileAccess.file_exists(path):
 		path = directory.path_join("%s_%d.json" % [slug, number])
 		number += 1
 	return path
+
+
+## The project name as a file name: lower case, umlauts spelt out, anything else but letters and
+## digits as "_"; "projekt" if nothing is left.
+static func _slug(project_name: String) -> String:
+	var slug := ""
+	var name := project_name.to_lower().replace("ä", "ae").replace("ö", "oe").replace("ü", "ue").replace("ß", "ss")
+	for ch in name:
+		slug += ch if (ch >= "a" and ch <= "z") or (ch >= "0" and ch <= "9") else "_"
+	slug = slug.strip_edges().trim_prefix("_").trim_suffix("_")
+	return "projekt" if slug.is_empty() else slug

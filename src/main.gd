@@ -4,7 +4,10 @@ extends Control
 ## start the last project opens again.
 ##
 ## Command line (after `--`): `--projects-dir=<path>` keeps projects in another folder (for test
-## runs), `--open=<path>` opens an image as a new project, `--max-skip=<n>` sets the skip limit
+## runs), `--open=<path>` opens an image as a new project, `--import=<path>` imports an exported
+## project file, `--export=<path>` writes the open project's export file there,
+## `--storage=<safe|may-clear|not-kept>` pretends the browser keeps the projects that safely
+## (BrowserStorage, for the warnings), `--max-skip=<n>` sets the skip limit
 ## (-1: none), `--start=<corner>` sets the start corner (auto, top-left, top-right, bottom-left,
 ## bottom-right), `--settings` opens the settings dialog (`--advanced`: with the advanced part open),
 ## `--method=<english|danish>` sets the stitch method, `--back-pass=<whole|blocks>` the Danish
@@ -187,7 +190,9 @@ var _picker_open := false
 var _picker_tween: Tween
 var _color_list: VBoxContainer
 var _stitch_panel: StitchPanel
-var _file_dialog: FileDialog
+var _files: FileExchange
+## Whether the browser was asked to keep the projects this session (BrowserStorage.request()).
+var _storage_requested := false
 ## Progress of the colour being stitched, or of the whole project in the overview.
 var _progress: ProgressStrip
 var _celebration: Celebration
@@ -222,9 +227,11 @@ func _ready() -> void:
 			ProjectStore.directory = arg.trim_prefix("--projects-dir=")
 		opens_image = opens_image or arg.begins_with("--open=")
 	_palette = FlossPalette.dmc()
+	BrowserStorage.check()
 	_apply_ui_scale(Preferences.ui_scale())
 	_build_ui()
 	resized.connect(_update_layout)
+	get_window().files_dropped.connect(_on_files_dropped)
 	_apply_ui_mode()
 	_apply_light()
 	_apply_style()
@@ -232,20 +239,19 @@ func _ready() -> void:
 		var last := ProjectStore.last_project_path()
 		if not last.is_empty() and FileAccess.file_exists(last):
 			_open_project(last)
+	if BrowserStorage.safety == BrowserStorage.Safety.NOT_KEPT:
+		_show_message(BrowserStorage.warning())
 	_handle_cmdline()
 
 
 func _build_ui() -> void:
-	_file_dialog = FileDialog.new()
-	_file_dialog.file_mode = FileDialog.FILE_MODE_OPEN_FILE
-	_file_dialog.access = FileDialog.ACCESS_FILESYSTEM
-	_file_dialog.filters = PackedStringArray(["*.png ; PNG-Bilder"])
-	_file_dialog.use_native_dialog = true
-	_file_dialog.file_selected.connect(func(path: String) -> void:
-		_restore_overlays()
-		_open_image(path))
-	_file_dialog.canceled.connect(_restore_overlays)
-	add_child(_file_dialog)
+	_files = FileExchange.new()
+	# The project list keeps the overlays hidden until it closes itself.
+	_files.closed.connect(func() -> void:
+		if not _project_browser.is_open():
+			_restore_overlays())
+	_files.failed.connect(_report)
+	add_child(_files)
 
 	# These open a window, which closes the menu itself (and opens it again afterwards).
 	_toolbar = HFlowContainer.new()
@@ -332,6 +338,8 @@ func _build_ui() -> void:
 	_project_browser.open_requested.connect(_open_project)
 	_project_browser.project_renamed.connect(_on_project_renamed)
 	_project_browser.project_deleted.connect(_on_project_deleted)
+	_project_browser.export_requested.connect(_export_project)
+	_project_browser.import_requested.connect(_files.pick.bind(FileExchange.Kind.PROJECT, _import_project))
 	_project_browser.closed.connect(_restore_overlays)
 	add_child(_project_browser)
 
@@ -1233,8 +1241,21 @@ func _open_image(path: String) -> void:
 		image = load(path) as Image
 	else:
 		image = Image.load_from_file(path)
+	_start_project(path.get_file().get_basename(), image)
+
+
+## A PNG the user picked: on the web its bytes are all the app gets.
+func _open_image_data(file_name: String, bytes: PackedByteArray) -> void:
+	var image := Image.new()
+	if image.load_png_from_buffer(bytes) != OK:
+		image = null
+	_start_project(file_name.get_basename(), image)
+
+
+## A new project from the pixel art `image` (null if it couldn't be read), saved right away.
+func _start_project(project_name: String, image: Image) -> void:
 	if image == null or image.is_empty():
-		_show_message("Bild konnte nicht geladen werden.")
+		_show_message("Bild konnte nicht geladen werden. Es muss ein PNG sein.")
 		return
 	if image.get_width() > MAX_SIDE or image.get_height() > MAX_SIDE:
 		_show_message("Bild ist zu groß (%d × %d), höchstens %d Pixel pro Seite." % [
@@ -1242,14 +1263,59 @@ func _open_image(path: String) -> void:
 		return
 	if image.is_compressed():
 		image.decompress()
-	_set_project(StitchProject.create(path.get_file().get_basename(), image, _palette))
+	_set_project(StitchProject.create(project_name, image, _palette))
 	_save()
 
 
-## The file dialog for a new image, with the touch overlays out of the way until it closes.
+## The file picker for a new image. The app's own dialog keeps the touch overlays out of the way
+## until it closes; the browser's covers none of them, so only the menu closes.
 func _show_open_image() -> void:
-	_hide_overlays()
-	_file_dialog.popup_centered_ratio(0.8)
+	if FileExchange.in_browser():
+		_close_menu_unless_pinned()
+	else:
+		_hide_overlays()
+	_files.pick(FileExchange.Kind.IMAGE, _open_image_data)
+
+
+## Hands the project saved at `path` out as a file, to keep it safe or take it to another device:
+## the saved JSON as it is, which is up to date as every change is saved at once.
+func _export_project(path: String, project_name: String) -> void:
+	var text := FileAccess.get_file_as_string(path)
+	if text.is_empty():
+		_report("Exportieren fehlgeschlagen: %s" % error_string(FileAccess.get_open_error()))
+		return
+	_files.save_text(ProjectStore.export_name(project_name), text)
+
+
+## A project file someone exported becomes a new project here and opens.
+func _import_project(file_name: String, bytes: PackedByteArray) -> void:
+	var project := ProjectStore.read_export(bytes)
+	if project == null:
+		_report("„%s“ ist kein Projekt, das diese App lesen kann." % file_name)
+		return
+	if _project_browser.is_open():
+		_project_browser.close()
+	_set_project(project)
+	_save()
+
+
+## Files dragged onto the window (on a computer, also in the browser): an image starts a project,
+## a project file is imported. In the browser they are gone once this returns.
+func _on_files_dropped(paths: PackedStringArray) -> void:
+	var path := paths[0]
+	if path.get_extension().to_lower() == "json":
+		_import_project(path.get_file(), FileAccess.get_file_as_bytes(path))
+	else:
+		_open_image(path)
+
+
+## A message where the user is looking: under the project list while it is open, else in the info
+## line.
+func _report(text: String) -> void:
+	if _project_browser.is_open():
+		_project_browser.show_status(text)
+	else:
+		_show_message(text)
 
 
 func _show_settings() -> void:
@@ -1363,6 +1429,9 @@ func _set_project(project: StitchProject) -> void:
 	_leave_stitching()
 	_close_menu_unless_pinned()
 	_project = project
+	if not _storage_requested:
+		_storage_requested = true
+		BrowserStorage.request()
 	_apply_preferences()
 	_full_pattern = project.full_pattern(_palette)
 	_show_pattern(false)
@@ -1886,6 +1955,16 @@ func _handle_cmdline() -> void:
 	for arg in OS.get_cmdline_user_args():
 		if arg.begins_with("--open="):
 			_open_image(arg.trim_prefix("--open="))
+		elif arg.begins_with("--import="):
+			var import_path := arg.trim_prefix("--import=")
+			_import_project(import_path.get_file(), FileAccess.get_file_as_bytes(import_path))
+		elif arg.begins_with("--export="):
+			if _project != null:
+				_files.write_text(arg.trim_prefix("--export="), FileAccess.get_file_as_string(_project.path))
+		elif arg.begins_with("--storage="):
+			BrowserStorage.safety = {"may-clear": BrowserStorage.Safety.MAY_BE_CLEARED,
+					"not-kept": BrowserStorage.Safety.NOT_KEPT}.get(arg.trim_prefix("--storage="),
+					BrowserStorage.Safety.SAFE)
 		elif arg.begins_with("--stitch="):
 			stitch_code = arg.trim_prefix("--stitch=")
 		elif arg.begins_with("--steps="):

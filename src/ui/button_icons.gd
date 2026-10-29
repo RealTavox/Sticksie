@@ -5,7 +5,7 @@ class_name ButtonIcons
 ## units of the button's disc: (0, 0) is its centre, 1 its rim, y points down. Each mask is
 ## made once and cached.
 
-enum Icon { MENU, TEXT, NEEDLE, SPOOL, PIN, IMAGE, FOLDER, PROJECTS, GEAR, PENCIL, TRASH, CLOSE, CHECK, OVERVIEW, FLIP, BACK, NEW_THREAD, LIST, FILTER, WRENCH }
+enum Icon { MENU, TEXT, NEEDLE, SPOOL, PIN, IMAGE, FOLDER, PROJECTS, GEAR, PENCIL, TRASH, CLOSE, CHECK, OVERVIEW, FLIP, BACK, NEW_THREAD, LIST, FILTER, WRENCH, EXPORT, IMPORT }
 
 const SIZE := 128
 
@@ -245,7 +245,28 @@ static func distance(icon: Icon, p: Vector2) -> float:
 			var head := (p - Vector2(0.16, -0.16)).length() - 0.19
 			head = maxf(head, 0.11 - (p - Vector2(0.27, -0.27)).length())
 			return minf(head, _capsule(p, Vector2(-0.32, 0.32), Vector2(0.1, -0.1), 0.075))
+		Icon.EXPORT:
+			# An arrow up out of a tray: the file leaves the app.
+			return minf(_tray(p), _arrow(p, Vector2(0.0, 0.18), Vector2(0.0, -0.38)))
+		Icon.IMPORT:
+			# An arrow down into a tray: a file comes into the app.
+			return minf(_tray(p), _arrow(p, Vector2(0.0, -0.38), Vector2(0.0, 0.16)))
 	return INF
+
+
+## The open tray under the export and import arrows.
+static func _tray(p: Vector2) -> float:
+	var d := _capsule(p, Vector2(-0.36, 0.36), Vector2(0.36, 0.36), 0.055)
+	d = minf(d, _capsule(p, Vector2(-0.36, 0.36), Vector2(-0.36, 0.1), 0.055))
+	return minf(d, _capsule(p, Vector2(0.36, 0.36), Vector2(0.36, 0.1), 0.055))
+
+
+## A straight arrow from `from` with its head at `to`.
+static func _arrow(p: Vector2, from: Vector2, to: Vector2) -> float:
+	var back := (from - to).normalized() * 0.2
+	var d := _capsule(p, from, to, 0.055)
+	d = minf(d, _capsule(p, to, to + back.rotated(deg_to_rad(45.0)), 0.055))
+	return minf(d, _capsule(p, to, to + back.rotated(deg_to_rad(-45.0)), 0.055))
 
 
 ## An arc of radius 0.3 from angle `from` to `to` (radians, clockwise on screen), with an arrow

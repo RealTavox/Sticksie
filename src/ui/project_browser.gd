@@ -1,19 +1,24 @@
 class_name ProjectBrowser
 extends OverlayWindow
-## Lists the saved projects with a preview picture each, to open, rename or delete them.
-## Deleting asks first, since it can't be undone. Renaming and deleting happen here; the signals
+## Lists the saved projects with a preview picture each, to open, rename, export or delete them,
+## and imports exported ones. Deleting asks first, since it can't be undone. Renaming and deleting happen here; the signals
 ## let the start screen follow when it concerns the open project. The questions come up as
 ## smaller windows of the same look on top.
 
 signal open_requested(path: String)
 signal project_renamed(path: String, new_name: String)
 signal project_deleted(path: String)
+## The user wants the project saved at `path` as a file of their own.
+signal export_requested(path: String, project_name: String)
+## The user wants to pick an exported project file and add it.
+signal import_requested
 
 const PREVIEW_SIZE := Vector2(96, 96)
 
 ## Path of the project open on the start screen, marked in the list.
 var current_path := ""
 
+var _storage_label: Label
 var _list: VBoxContainer
 var _empty_label: Label
 var _status_label: Label
@@ -30,17 +35,24 @@ func _init() -> void:
 	super("Projekte")
 	fill_height = true
 	close_on_outside_tap = true
+	# Where the browser may lose the projects, a warning on top (BrowserStorage).
+	_storage_label = Label.new()
+	_storage_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_storage_label.add_theme_color_override("font_color", Color(1.0, 0.78, 0.45))
+	content.add_child(_storage_label)
 	_list = VBoxContainer.new()
 	_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_list.add_theme_constant_override("separation", 8)
 	content.add_child(_list)
 	_empty_label = Label.new()
-	_empty_label.text = "Noch keine Projekte. Öffne ein Bild, dann wird es hier gespeichert."
+	_empty_label.text = ("Noch keine Projekte. Öffne ein Bild, dann wird es hier gespeichert, "
+			+ "oder importiere ein exportiertes Projekt.")
 	_empty_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	content.add_child(_empty_label)
 	_status_label = Label.new()
 	_status_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	content.add_child(_status_label)
+	buttons.add_child(make_button("Projekt importieren", ButtonIcons.Icon.IMPORT, import_requested.emit))
 
 	_rename_window = OverlayWindow.new("Umbenennen")
 	_rename_window.max_width = 420.0
@@ -68,6 +80,8 @@ func _init() -> void:
 ## Fills the list from the saved files and opens the window.
 func open() -> void:
 	_status_label.text = ""
+	_storage_label.text = BrowserStorage.warning()
+	_storage_label.visible = not _storage_label.text.is_empty()
 	_fill()
 	super()
 
@@ -122,8 +136,15 @@ func _make_row(entry: Dictionary) -> Control:
 		close()
 		open_requested.emit(entry.path)))
 	row_buttons.add_child(make_button("Umbenennen", ButtonIcons.Icon.PENCIL, _ask_rename.bind(entry)))
+	row_buttons.add_child(make_button("Exportieren", ButtonIcons.Icon.EXPORT, func() -> void:
+		export_requested.emit(entry.path, entry.name)))
 	row_buttons.add_child(make_button("Löschen", ButtonIcons.Icon.TRASH, _ask_delete.bind(entry)))
 	return frame
+
+
+## Shows `text` under the list, e.g. why an import or export failed.
+func show_status(text: String) -> void:
+	_status_label.text = text
 
 
 func _ask_rename(entry: Dictionary) -> void:

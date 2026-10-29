@@ -26,6 +26,7 @@ func _initialize() -> void:
 	_test_project_round_trip()
 	_test_project_rejects_bad_data()
 	_test_project_store()
+	_test_project_export_import()
 	_test_thread_changes()
 	_test_manual_thread_changes()
 	_test_format_1_loads()
@@ -638,6 +639,43 @@ func _test_project_store() -> void:
 	_check(not FileAccess.file_exists(second.path), "deleted file is gone")
 	_check(ProjectStore.last_project_path().is_empty(), "deleted project is no longer the last one")
 	_check(ProjectStore.list().size() == 1, "deleted project isn't listed")
+
+	_clear_directory(ProjectStore.directory)
+	DirAccess.remove_absolute(ProjectStore.directory)
+	ProjectStore.directory = previous_directory
+
+
+func _test_project_export_import() -> void:
+	var previous_directory := ProjectStore.directory
+	ProjectStore.directory = "user://test_export"
+	_clear_directory(ProjectStore.directory)
+
+	_check(ProjectStore.export_name("Hypsi Anhänger") == "hypsi_anhaenger.kreuzstich.json",
+			"export file name from the project name: %s" % ProjectStore.export_name("Hypsi Anhänger"))
+	_check(ProjectStore.export_name("…") == "projekt.kreuzstich.json", "export name without letters")
+
+	var project := _sample_project()
+	project.session.advance(0)
+	project.session.advance(1)
+	ProjectStore.save(project)
+	# What the app hands out: the saved file as it is.
+	var exported := FileAccess.get_file_as_bytes(project.path)
+	var imported := ProjectStore.read_export(exported)
+	_check(imported != null and imported.path.is_empty(), "export reads back as a project not yet saved")
+	if imported != null:
+		_check(imported.name == project.name, "import keeps the name")
+		_check(imported.session.cell_states() == project.session.cell_states(), "import keeps the progress")
+		_check(ProjectStore.save(imported) == OK and imported.path != project.path,
+				"imported project gets a file of its own: %s" % imported.path)
+		_check(ProjectStore.list().size() == 2, "imported project is listed beside the original")
+
+	_check(ProjectStore.read_export("{ not json".to_utf8_buffer()) == null, "broken file isn't imported")
+	_check(ProjectStore.read_export("[1, 2]".to_utf8_buffer()) == null, "JSON that isn't a project isn't imported")
+	var newer := project.to_dict()
+	newer.format = StitchProject.FORMAT + 1
+	_check(ProjectStore.read_export(JSON.stringify(newer).to_utf8_buffer()) == null,
+			"file from a newer app isn't imported")
+	_check(ProjectStore.read_export(PackedByteArray()) == null, "empty file isn't imported")
 
 	_clear_directory(ProjectStore.directory)
 	DirAccess.remove_absolute(ProjectStore.directory)

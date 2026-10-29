@@ -19,7 +19,12 @@ item is resolved during normal work, delete its entry in the same change.
 ### Code scope
 
 - Project code: `src/` (`project/` saving: `StitchProject` and its JSON format, `ProjectStore`
-  files in `user://projects/` (list with preview picture, rename, delete) and the last opened project, `Preferences` app-wide settings in
+  files in `user://projects/` (list with preview picture, rename, delete) and the last opened project; export is the saved
+  JSON as it is under `export_name()` (`*.kreuzstich.json`), `read_export()` reads one back as a new, unsaved project;
+  `BrowserStorage` in the browser, where `user://` is the browser's IndexedDB: `check()` at start
+  (`navigator.storage.persisted()`), `request()` (`persist()`) once a project is open, `safety` SAFE /
+  MAY_BE_CLEARED / NOT_KEPT (no IndexedDB, e.g. a private window) and `warning()`: NOT_KEPT shows in the
+  info line at start, both on top of the project list; `Preferences` app-wide settings in
   `settings.cfg` next to the projects (light direction and height in section `view`, default from the top left at 55°, set in the
   developer tools; skip limit, start corner or automatic, stitch method, block size, the
   stitch style; not saved in the project file, pushed into the open project; plus the touch or
@@ -84,10 +89,16 @@ item is resolved during normal work, delete its entry in the same change.
   `OverlayWindow` the in-app windows in the overlays' look (dark rounded panel, title with a close
   button, scrolling content, buttons at the bottom, over a dimmed screen that takes all input and
   keys; slides up and fades in, back down and out; the settings, the project list and its rename
-  and delete questions are ones; opening the file dialog, the project list or the settings closes
+  and delete questions are ones; opening the app's file dialog, the project list or the settings closes
   the open touch overlays, menu included, and `main.gd` `_restore_overlays()` opens them again when
-  it closes), `ProjectBrowser` the
-  project list: open, rename, delete after a confirmation, the open project's row blue like a
+  it closes), `FileExchange` gets files in and out: the app's native file dialogs, or in the browser
+  (no native dialog there, and the app sees only its own storage) a hidden `<input type=file>`
+  (`showPicker()`, else `click()`; browsers allow it only shortly after a tap) and a download,
+  through a small JavaScript helper (`BROWSER_HELPER`, `window.kreuzstichFiles`) called via
+  `JavaScriptBridge`; files dropped on the window open too (`main.gd` `_on_files_dropped()`: a
+  `.json` is imported, anything else opened as an image), `ProjectBrowser` the
+  project list: open, rename, export, delete after a confirmation, "Projekt importieren" at the
+  bottom (`main.gd` `_import_project()` opens it as a new project), the open project's row blue like a
   pressed button; the preview comes from
   `ProjectStore.preview()`, for now the source image, later meant to show the progress), `main.tscn`/`main.gd` the start screen (the settings' collapsible "Entwicklertools", built only when
   `OS.is_debug_build()`, so release exports leave them out, hold the light, the sample image and
@@ -165,7 +176,7 @@ How to check a change; every fix and feature runs these. Godot binary:
 2. `$G --headless --path . --script res://tests/run_tests.gd`: prints "All tests passed."
    and exits 0. Plain checks without a framework (Lab/CIEDE2000 against Sharma's reference
    pairs, DMC palette, importing the sample, stitch planner incl. that every cell of the sample
-   is crossed exactly once, stitching progress, position hints and their wording, view gestures fed as touch events, incl. the swipe back dragging the page, replaying a tapped symbol card, the view keeping the step inside when its corner is far away).
+   is crossed exactly once, stitching progress, position hints and their wording, view gestures fed as touch events, incl. the swipe back dragging the page, replaying a tapped symbol card, the view keeping the step inside when its corner is far away, exporting and importing a project).
 3. `$G --headless --path . --quit-after 120 -- --projects-dir=<scratch dir> --open=res://samples/hypsi_anhaenger.png --stitch=3837 --steps=7 2>&1 | grep -E "ERROR|WARNING"`:
    no output. Always pass `--projects-dir` with a scratch folder: every run that opens an image
    saves a project, and without it that lands in the user's real projects.
@@ -176,7 +187,7 @@ How to check a change; every fix and feature runs these. Godot binary:
    skip limit (-1: none), `--start=<auto|top-left|top-right|bottom-left|bottom-right>` the start corner, `--settings` to open the settings dialog, `--projects` the project list, `--back` the back side while stitching,
    `--method=<danish|english>`, `--back-pass=<whole|blocks>`, `--max-block=<n>`, `--needle=<auto|bottom|top>`, `--first-leg=<slash|backslash>`
    (both fix the style), `--dev-tools` with `--settings` for the developer tools, `--scroll=<px>` scrolls the open window (settings, project list) that far down before the screenshot, `--dev=<on|off>` the developer mode (saved), `--symbols=<on|off|still|animated>` the symbol window or its still pictures (saved) or
-   `--symbols=<secure|thread|anchor|count|stitch>[,<0..1>]` to hold that card at that point of its animation, `--ui=<touch|desktop>` the layout, `--ui-scale=<factor>` the UI-Skalierung (saved),
+   `--symbols=<secure|thread|anchor|count|stitch>[,<0..1>]` to hold that card at that point of its animation, `--ui=<touch|desktop>` the layout, `--ui-scale=<factor>` the UI-Skalierung (saved), `--import=<path>` imports an exported project, `--export=<path>` writes the open project's export there, `--storage=<safe|may-clear|not-kept>` fakes the browser storage's safety for the warnings,
    `--overlays=<menu,pin,list,text>` opens touch overlays, `--picker=<code>` the colour picker
    for a colour of the list, `--picker-view=<list,project>` its list view and/or project filter, `--pick=<code>` chooses a colour in it, `--tooltip=<menu|list|text>` shows a
    round button's tooltip, `--safe-area=<l>,<t>,<r>,<b>` fakes a notch or island (canvas px), `--finish` stitches the rest of the `--stitch` colour (the celebration comes in), `--dismiss` taps it away to the overview, `--finale` shows the finished-project show, `--wait=<seconds>` waits that long before the screenshot (e.g. into the bar's fill; otherwise screenshots wait for the fill), `--zoom=<cell px>`
@@ -188,7 +199,11 @@ How to check a change; every fix and feature runs these. Godot binary:
 Real touch input (pan, pinch, edge swipes against the system's own edge gestures), mouse
 gestures in a running window, long-press tooltips and the native file dialog are not covered
 by these; check them on a
-device or in the editor and say so in the report. Resuming: run once with `--open` and
+device or in the editor and say so in the report. The browser side (`FileExchange` in the
+browser, `BrowserStorage`) only runs in a web export: export a copy of the project with a Web
+preset (nothreads; there is no `export_presets.cfg` in the repo), serve it on `localhost` (a
+secure context; a phone needs HTTPS) and check it in the browser, e.g. by giving the hidden file
+input a `DataTransfer` file and catching the download link's `click()`. Resuming: run once with `--open` and
 `--steps`, then again with only `--projects-dir` (the last project opens by itself).
 
 ### Save format
