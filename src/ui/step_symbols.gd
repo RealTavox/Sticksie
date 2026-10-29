@@ -1,6 +1,6 @@
 class_name StepSymbols
 extends Control
-## A small window at the bottom of the stitching screen that shows the current step as symbols,
+## A small window at the top of the stitching screen that shows the current step as symbols,
 ## a square card per part of the step side by side, each with a short animation that plays once,
 ## one card after the other from left to right, then stays: securing the old thread (the needle
 ## goes under the stitches on the back, then scissors cut it), threading a new one (the doubled

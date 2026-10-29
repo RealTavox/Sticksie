@@ -99,9 +99,10 @@ item is resolved during normal work, delete its entry in the same change.
   (`StitchScene.orbit()`: shifted towards the light, so it rises towards overhead on the far side
   and never comes low from the opposite corner; `main.gd` `_spin_light()`), during both shows it
   keeps turning (`_loop_light()`),
-  `StepSymbols` the small symbol window at the bottom middle of the stitching screen
-  (above the round buttons and open panels, gliding along, as wide as its cards; room for it is
-  kept with `set_covered()`): white symbols only, a square card per part of the step side by
+  `StepSymbols` the small symbol window at the top middle of the stitching screen, away from
+  the thumb working the pattern (below the safe area or the open menu, beside the round menu
+  button or under it when too wide, gliding along, as wide as its cards; room for it is kept
+  with `set_covered()`): white symbols only, a square card per part of the step side by
   side, each animated once, one after the other from left to right (waiting ones faded), then
   standing; redrawn at most 30 times a second while playing: securing the old thread (needle
   under the back stitches, scissors cut and open again, so the still picture shows scissors), threading (the doubled thread through the eye of the

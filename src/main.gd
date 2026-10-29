@@ -133,15 +133,15 @@ var _dev_tools_box: VBoxContainer
 var _dev_mode_box: CheckBox
 ## Shown under the menu button in developer mode; a toggle without a job yet.
 var _dev_button: RoundButton
-## The symbol window at the bottom of the stitching screen, its switch in the advanced settings,
+## The symbol window at the top of the stitching screen, its switch in the advanced settings,
 ## and whether it has been put in place since it last appeared (then it glides when it moves).
 var _symbols: StepSymbols
 var _symbols_box: CheckBox
 var _symbols_still_box: CheckBox
 var _symbols_speed_option: OptionButton
 var _symbols_placed := false
-## How far above the pattern's lower edge it was last put (the touch layout's buttons and panels).
-var _symbols_bottom := 0.0
+## How far below the pattern's upper edge it was last put (the safe area or the open menu).
+var _symbols_top := 0.0
 var _symbols_tween: Tween
 var _needle_option: OptionButton
 var _leg_option: OptionButton
@@ -886,7 +886,7 @@ func _update_layout() -> void:
 	if _touch:
 		_layout_touch()
 		return
-	_view.set_covered(0.0, _symbols_room())
+	_view.set_covered(_symbols_room(), 0.0)
 	_place_symbols.call_deferred(0.0)
 	# Portrait: pattern above the side panel; landscape: side panel on the right.
 	var portrait := size.y > size.x
@@ -964,8 +964,8 @@ func _update_cover() -> void:
 	var bottom := size.y - _list_button.position.y
 	if _list_panel.visible or _text_panel.visible:
 		bottom = size.y - _dock.get_rect().position.y
-	_view.set_covered(top, bottom + _symbols_room())
-	_place_symbols(bottom)
+	_view.set_covered(top + _symbols_room(), bottom)
+	_place_symbols(top)
 	if _stitch_thread >= 0 and _shown_step != null:
 		_view.ensure_visible(_shown_step, _shown_hint, _shown_thread_end, true)
 
@@ -975,7 +975,7 @@ func _update_cover() -> void:
 func _update_symbols() -> void:
 	var show := _stitch_thread >= 0 and Preferences.step_symbols() and _symbols.has_cards()
 	if show == _symbols.visible:
-		_place_symbols(_symbols_bottom)  # It may have grown or shrunk with its cards.
+		_place_symbols(_symbols_top)  # It may have grown or shrunk with its cards.
 		return
 	_symbols.visible = show
 	_symbols_placed = false
@@ -985,20 +985,44 @@ func _update_symbols() -> void:
 		_update_layout()
 
 
-## Height the symbol window takes from the bottom of the pattern, with its gap.
+## Height the symbol window takes from the top of the pattern, with its gap (and the round
+## buttons on the left it goes under when there is no room beside them).
 func _symbols_room() -> float:
-	return StepSymbols.SIDE + TOUCH_MARGIN if _symbols.visible else 0.0
+	if not _symbols.visible:
+		return 0.0
+	return StepSymbols.SIDE + TOUCH_MARGIN + _symbols_drop(_symbols_top)
 
 
-## Puts the symbol window (as wide as its cards) in the middle at the bottom of the pattern, `bottom` above its lower edge
-## (the round buttons and open panels in the touch layout); it glides there when it moves.
-func _place_symbols(bottom: float) -> void:
-	_symbols_bottom = bottom
+## How far the symbol window goes down from `top` to pass under the touch layout's round
+## buttons on the left (menu, developer button) when it is too wide to sit beside them.
+func _symbols_drop(top: float) -> float:
+	if not _touch:
+		return 0.0
+	var buttons := _dev_button if _dev_button.visible else _menu_button
+	var beside := size.x - _safe.z - TOUCH_MARGIN - _symbols_left_limit()
+	if _symbols.size.x <= beside:
+		return 0.0
+	return maxf(buttons.get_rect().end.y - top, 0.0)
+
+
+## Left edge the symbol window keeps clear of in the touch layout: the round buttons' column.
+func _symbols_left_limit() -> float:
+	return _menu_button.get_rect().end.x + TOUCH_MARGIN if _touch else 0.0
+
+
+## Puts the symbol window (as wide as its cards) in the middle at the top of the pattern, `top`
+## below its upper edge (the safe area or the open menu in the touch layout), where a tap on it
+## is far from the thumb working the pattern; it glides there when it moves.
+func _place_symbols(top: float) -> void:
+	_symbols_top = top
 	if not _symbols.visible:
 		return
 	var view := _view.get_global_rect()
-	var target := Vector2(view.get_center().x - _symbols.size.x / 2.0,
-			view.end.y - bottom - StepSymbols.SIDE - TOUCH_MARGIN).round()
+	var drop := _symbols_drop(top)
+	var x := view.get_center().x - _symbols.size.x / 2.0
+	if drop == 0.0:
+		x = maxf(x, _symbols_left_limit())
+	var target := Vector2(x, view.position.y + top + drop + TOUCH_MARGIN).round()
 	if _symbols_tween != null:
 		_symbols_tween.kill()
 	if not _symbols_placed:
