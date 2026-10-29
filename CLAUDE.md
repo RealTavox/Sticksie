@@ -139,6 +139,9 @@ item is resolved during normal work, delete its entry in the same change.
 - Data: `data/threads/dmc-floss.csv` (DMC palette, CC BY 4.0, source and credit in
   `data/threads/SOURCE.md`; the credit must stay visible in the app). `samples/` holds test
   images.
+- License: GPLv3 (`LICENSE`, the unmodified text). Bundled parts keep their own: Godot (MIT;
+  its notice has to ship with every exported build, the app doesn't show it yet), the DMC data
+  (CC BY 4.0), `addons/godot_ai/` (MIT).
 - Generated / not project code: `.godot/`; `addons/godot_ai/` (third-party Godot AI MCP
   add-on, v4.3.1, MIT; update it only with the dock's Update button, never by extracting over
   it). It registers the autoload `_mcp_game_helper`, which only acts while a debugger is
