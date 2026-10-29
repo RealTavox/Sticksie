@@ -58,6 +58,9 @@ const MIN_ARROW_CELL_PX := 12.0
 const MIN_CELL_PX := 2.0
 const MAX_CELL_PX := 96.0
 const FIT_MARGIN := 16.0
+## Shown together with its counting path, the step keeps at least this share of the view away
+## from the view's edges; a path too long for that runs off screen and the step is centred.
+const STEP_EDGE_SHARE := 0.15
 const WHEEL_ZOOM := 1.15
 ## A touch that moves less than this is a tap.
 const TAP_SLOP := 12.0
@@ -427,24 +430,32 @@ func focus_step(step: StitchStep, min_cell_px: float) -> void:
 
 
 ## Pans so the cells of `step` (and the reference stitch of `hint`, and `extra` if given) are on
-## screen, if they aren't already.
+## screen, if they aren't already. Where showing them all would push the step towards an edge of
+## the view (STEP_EDGE_SHARE), the step is centred on that axis instead.
 ## With `animate` the view glides there instead of jumping.
 func ensure_visible(step: StitchStep, hint: PositionHint = null, extra := Vector2i(-1, -1),
 		animate := false) -> void:
 	if not _is_laid_out():
 		return
 	_stop_pan()
-	var rect := _step_rect(step)
-	if hint != null:
-		rect = rect.merge(_cell_rect(hint.reference.x, hint.reference.y))
-	if extra.x >= 0:
-		rect = rect.merge(_cell_rect(extra.x, extra.y))
 	# Room for the badges beside the step and the path.
-	rect = rect.grow(_badge_gap() + _badge_radius("00") * 2.0)
+	var margin := _badge_gap() + _badge_radius("00") * 2.0
+	var own := _step_rect(step).grow(margin)
+	var rect := own
+	if hint != null:
+		rect = rect.merge(_cell_rect(hint.reference.x, hint.reference.y).grow(margin))
+	if extra.x >= 0:
+		rect = rect.merge(_cell_rect(extra.x, extra.y).grow(margin))
 	var view := _free_rect().grow(-FIT_MARGIN)
 	if view.encloses(rect):
 		return
-	var target := _origin + view.get_center() - rect.get_center()
+	var shift := view.get_center() - rect.get_center()
+	var inset := view.size * STEP_EDGE_SHARE
+	var inner := view.grow_individual(-inset.x, -inset.y, -inset.x, -inset.y)
+	for axis in 2:
+		if own.position[axis] + shift[axis] < inner.position[axis] or own.end[axis] + shift[axis] > inner.end[axis]:
+			shift[axis] = view.get_center()[axis] - own.get_center()[axis]
+	var target := _origin + shift
 	if not animate or not is_inside_tree():
 		_set_origin(target)
 		return

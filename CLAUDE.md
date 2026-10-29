@@ -61,7 +61,10 @@ item is resolved during normal work, delete its entry in the same change.
   from the left edge = overview (while stitching it drags the page along with the finger over a
   picture of the overview, `back_page`, and goes or springs back on release; `slide_in()` /
   `slide_back()` play the same move for entering stitching and the Übersicht button, and the
-  overview's zoom is put back on return); `set_covered()` keeps steps clear of overlays), `StitchPanel`
+  overview's zoom is put back on return); `set_covered()` keeps steps clear of overlays;
+  `ensure_visible()` shows the step with its reference unless that pushes the step into the
+  outer `STEP_EDGE_SHARE` of the view, then it centres the step and the counting path runs off
+  screen), `StitchPanel`
   step guidance (texts in `info`, buttons in `controls`, so the touch layout can split them),
   `RoundButton` the round see-through touch buttons (lit by `round_button.gdshader` from the
   same light as the fabric, `tint_color` when on: the block colour while stitching, blue in the overview, symbols from `ButtonIcons` distance functions, tooltip on long press; `ButtonIcons.button_icon()`
@@ -158,7 +161,7 @@ How to check a change; every fix and feature runs these. Godot binary:
 2. `$G --headless --path . --script res://tests/run_tests.gd`: prints "All tests passed."
    and exits 0. Plain checks without a framework (Lab/CIEDE2000 against Sharma's reference
    pairs, DMC palette, importing the sample, stitch planner incl. that every cell of the sample
-   is crossed exactly once, stitching progress, position hints and their wording, view gestures fed as touch events, incl. the swipe back dragging the page, replaying a tapped symbol card).
+   is crossed exactly once, stitching progress, position hints and their wording, view gestures fed as touch events, incl. the swipe back dragging the page, replaying a tapped symbol card, the view keeping the step inside when its corner is far away).
 3. `$G --headless --path . --quit-after 120 -- --projects-dir=<scratch dir> --open=res://samples/hypsi_anhaenger.png --stitch=3837 --steps=7 2>&1 | grep -E "ERROR|WARNING"`:
    no output. Always pass `--projects-dir` with a scratch folder: every run that opens an image
    saves a project, and without it that lands in the user's real projects.

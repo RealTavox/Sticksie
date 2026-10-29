@@ -41,6 +41,7 @@ func _initialize() -> void:
 	_test_picker_order()
 	_test_leg_progress()
 	_test_light_orbit()
+	_test_view_keeps_step_inside()
 	# The root joins the tree only once the main loop runs; gestures need it for their timers.
 	await process_frame
 	_test_gestures()
@@ -1116,6 +1117,34 @@ func _test_page_swipe() -> void:
 	_check(swiped[0] == 0, "the swipe back waits for the page to go")
 	await create_timer(PatternView.PAGE_SECONDS + 0.2).timeout
 	_check(swiped[0] == 1 and view._page_shift == 400.0, "a long swipe back goes all the way")
+	view.free()
+
+
+## The first step of a colour is shown with the corner it is counted from, as long as that leaves
+## the step well inside the view; a corner far away runs off screen and the step is centred.
+func _test_view_keeps_step_inside() -> void:
+	var view := PatternView.new()
+	view.size = Vector2(720, 1280)
+	view._cell_px = 24.0
+	var near := _pattern([".".repeat(60), ".".repeat(60), "...0000" + ".".repeat(53)])
+	var session := StitchSession.new(near)
+	var step := session.current_step(0)
+	var hint := PositionHint.find(near, session.cell_states(), step)
+	view.pattern = near
+	view.ensure_visible(step, hint)
+	var screen := Rect2(Vector2.ZERO, view.size)
+	_check(screen.encloses(view._cell_rect(hint.reference.x, hint.reference.y))
+			and screen.encloses(view._step_rect(step)), "a near corner is shown with the step")
+	var far := _pattern([".".repeat(60), ".".repeat(60), ".".repeat(35) + "0000" + ".".repeat(21)])
+	session = StitchSession.new(far)
+	step = session.current_step(0)
+	hint = PositionHint.find(far, session.cell_states(), step)
+	view.pattern = far
+	view.ensure_visible(step, hint)
+	var center := view._step_rect(step).get_center()
+	_check(hint.landmark == PositionHint.Landmark.CORNER and hint.reference.x == 59
+			and absf(center.x - view.size.x / 2.0) < 1.0,
+			"a step far from its corner is centred, got x %.1f" % center.x)
 	view.free()
 
 
