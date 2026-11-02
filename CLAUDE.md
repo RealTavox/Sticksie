@@ -213,11 +213,17 @@ Real touch input (pan, pinch, edge swipes against the system's own edge gestures
 gestures in a running window, long-press tooltips and the native file dialog are not covered
 by these; check them on a
 device or in the editor and say so in the report. The browser side (`FileExchange` in the
-browser, `BrowserStorage`) only runs in a web export: export a copy of the project with a Web
-preset (nothreads; there is no `export_presets.cfg` in the repo), serve it on `localhost` (a
+browser, `BrowserStorage`) only runs in a web export: `$G --headless --path . --export-release
+"Web" build/web/index.html` (preset "Web" in `export_presets.cfg`, nothreads, so no
+COOP/COEP headers; `build/` is ignored), serve `build/web` on `localhost` (a
 secure context; a phone needs HTTPS) and check it in the browser, e.g. by giving the hidden file
 input a `DataTransfer` file and catching the download link's `click()`. Resuming: run once with `--open` and
 `--steps`, then again with only `--projects-dir` (the last project opens by itself).
+
+CI: `.github/workflows/web.yml` runs steps 1 and 2 and the web export on Linux with
+Godot `GODOT_VERSION` (keep it in step with the local binary; Godot and the web template are
+cached), on every push and pull request; pushes to `main` are published on GitHub Pages
+(repo setting Pages → Source "GitHub Actions").
 
 ### Save format
 

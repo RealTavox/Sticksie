@@ -1,0 +1,90 @@
+# Tests the project and exports it as a web page (preset "Web" in export_presets.cfg,
+# without threads, so it needs no special server headers). Pushes to main are published
+# on GitHub Pages; pull requests only build.
+name: Web
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: web-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GODOT_VERSION: 4.7.2
+  GODOT_DIR: ${{ github.workspace }}/../godot
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache Godot
+        id: cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.GODOT_DIR }}
+          key: godot-${{ env.GODOT_VERSION }}-web
+
+      - name: Download Godot and the web template
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          base=https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-stable
+          mkdir -p "$GODOT_DIR"
+          cd "$GODOT_DIR"
+          curl -fsSL -o godot.zip "$base/Godot_v${GODOT_VERSION}-stable_linux.x86_64.zip"
+          unzip -q godot.zip && rm godot.zip
+          mv "Godot_v${GODOT_VERSION}-stable_linux.x86_64" godot
+          # The template archive holds every platform (over 1 GB); keep only the web one.
+          curl -fsSL -o templates.tpz "$base/Godot_v${GODOT_VERSION}-stable_export_templates.tpz"
+          unzip -q -j templates.tpz templates/version.txt templates/web_nothreads_release.zip -d templates
+          rm templates.tpz
+
+      - name: Install Godot
+        run: |
+          echo "G=$GODOT_DIR/godot" >> "$GITHUB_ENV"
+          dest="$HOME/.local/share/godot/export_templates/${GODOT_VERSION}.stable"
+          mkdir -p "$dest"
+          cp "$GODOT_DIR"/templates/* "$dest/"
+
+      - name: Import
+        run: |
+          "$G" --headless --path . --import 2>&1 | tee import.log
+          ! grep -E "ERROR|WARNING" import.log
+
+      - name: Tests
+        run: '"$G" --headless --path . --script res://tests/run_tests.gd'
+
+      - name: Export
+        run: |
+          mkdir -p build/web
+          "$G" --headless --path . --export-release "Web" build/web/index.html
+          test -f build/web/index.pck
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: build/web
+
+  deploy:
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    concurrency:
+      group: pages
+      cancel-in-progress: false
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@v4
