@@ -47,6 +47,7 @@ func _initialize() -> void:
 	await process_frame
 	_test_gestures()
 	_test_symbols_replay()
+	_test_symbols_stitch_runs()
 	await _test_page_swipe()
 	if _failures == 0:
 		print("All tests passed.")
@@ -76,6 +77,38 @@ func _test_symbols_replay() -> void:
 	_check(is_equal_approx(views[1].t, 0.5) and is_equal_approx(views[0].t, 1.0), "only the tapped card plays")
 	symbols._process(StepSymbols.CARD_SECONDS[StepSymbols.Card.THREAD])
 	_check(views[1].t == 1.0 and symbols._replays.is_empty(), "the replay ends on the last frame")
+	symbols.free()
+
+
+## Every step of the sample gets a stitch card per run of stitches worked alike, the runs adding
+## up to the step and each card's legs those of every stitch it stands for.
+func _test_symbols_stitch_runs() -> void:
+	var project := _sample_project()
+	var style := StitchStyle.new()
+	var symbols := StepSymbols.new()
+	var split := 0
+	var wrong := 0
+	for thread in project.pattern.thread_codes.size():
+		for step in project.session.steps(thread):
+			symbols.show_step(step, null, style, false, false)
+			var groups := symbols._stitch_groups
+			var holes := style.needle_holes(step)
+			var per_cell := 2 if step.kind == StitchStep.Kind.CROSS else 1
+			var c := 0
+			for group in groups:
+				for n in group.count:
+					var cell := Vector2(step.cells[c], step.row)
+					for i in per_cell:
+						var at := (c * per_cell + i) * 2
+						if group.legs[i] != PackedVector2Array([holes[at] - cell, holes[at + 1] - cell]):
+							wrong += 1
+					c += 1
+			if c != step.cells.size() or symbols._cards.count(StepSymbols.Card.STITCH) != groups.size():
+				wrong += 1
+			if groups.size() > 1:
+				split += 1
+	_check(wrong == 0, "stitch cards add up to the step and show its legs (%d wrong)" % wrong)
+	_check(split > 0, "some sample steps start or end differently and get more than one stitch card")
 	symbols.free()
 
 

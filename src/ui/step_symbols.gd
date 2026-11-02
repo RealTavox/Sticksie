@@ -7,7 +7,8 @@ extends Control
 ## thread goes through the needle's eye), counting holes (an arrow per direction with its
 ## count), starting the thread with the loop (down through a hole bringing the loop, up through
 ## the next, through the loop and back down) and the stitch itself (one leg from the hole where the needle comes up to
-## where it goes down, and how many). Symbols, not pictures: only white lines, dots and numbers
+## where it goes down, and how many; a card per run of stitches worked alike, so a first stitch
+## that comes up elsewhere gets its own card before the rest). Symbols, not pictures: only white lines, dots and numbers
 ## on the overlays' see-through grey. A tap on a card plays its animation once more.
 
 enum Card { SECURE, THREAD, ANCHOR, COUNT, STITCH }
@@ -55,10 +56,9 @@ var _held := false
 var _replays := {}
 ## COUNT: the counting legs in holes, in order.
 var _legs: Array[Vector2i] = []
-## STITCH: per leg its up and down hole within the cell (0 or 1 on each axis), and how many
-## stitches the step has.
-var _stitch_legs: Array[PackedVector2Array] = []
-var _stitch_count := 0
+## STITCH cards, one per run of stitches worked alike, in order: `legs` per leg its up and down
+## hole within the cell (0 or 1 on each axis), `count` how many stitches in a row.
+var _stitch_groups: Array[Dictionary] = []
 var _needle: ImageTexture
 ## Where the needle's eye is along it, from the head end, as a share of its length.
 var _eye_at := 0.0
@@ -95,8 +95,9 @@ func show_step(step: StitchStep, hint: PositionHint, style: StitchStyle, new_thr
 					_legs.append(leg)
 		if new_thread:
 			_cards.append(Card.ANCHOR)
-		_cards.append(Card.STITCH)
 		_set_stitch(step, style)
+		for group in _stitch_groups:
+			_cards.append(Card.STITCH)
 	_build_views()
 
 
@@ -105,18 +106,27 @@ func show_preview() -> void:
 	_cards = [Card.SECURE, Card.THREAD, Card.COUNT, Card.ANCHOR, Card.STITCH]
 	_legs = [Vector2i(3, 0), Vector2i(0, 2)]
 	_set_stitch(StitchStep.new(StitchStep.Kind.CROSS, 0, 0, PackedInt32Array([0]), 0), StitchStyle.new())
-	_stitch_count = 5
+	_stitch_groups[0].count = 5
 	_build_views()
 
 
-## The STITCH card's legs within the first cell of `step`, and how many stitches it has.
+## The STITCH cards of `step`: its stitches in order, those whose legs go the same way within
+## their cell taken together. Mostly one card; the first stitch can come up on another side (the
+## side the step comes from) and the last go down through another hole (StitchStyle).
 func _set_stitch(step: StitchStep, style: StitchStyle) -> void:
-	_stitch_legs.clear()
+	_stitch_groups.clear()
 	var holes := style.needle_holes(step)
-	var cell := Vector2(step.cells[0], step.row)
-	for i in (2 if step.kind == StitchStep.Kind.CROSS else 1):
-		_stitch_legs.append(PackedVector2Array([holes[i * 2] - cell, holes[i * 2 + 1] - cell]))
-	_stitch_count = step.cells.size()
+	var legs_per_cell := 2 if step.kind == StitchStep.Kind.CROSS else 1
+	for c in step.cells.size():
+		var cell := Vector2(step.cells[c], step.row)
+		var legs: Array[PackedVector2Array] = []
+		for i in legs_per_cell:
+			var at := (c * legs_per_cell + i) * 2
+			legs.append(PackedVector2Array([holes[at] - cell, holes[at + 1] - cell]))
+		if not _stitch_groups.is_empty() and _stitch_groups[-1].legs == legs:
+			_stitch_groups[-1].count += 1
+		else:
+			_stitch_groups.append({"legs": legs, "count": 1})
 
 
 ## A view per card, played from the start.
@@ -124,8 +134,12 @@ func _build_views() -> void:
 	for view in _views:
 		view.queue_free()
 	_views.clear()
+	var stitch_cards := 0
 	for i in _cards.size():
 		var view := CardView.new(self, _cards[i])
+		if _cards[i] == Card.STITCH:
+			view.stitch = _stitch_groups[stitch_cards]
+			stitch_cards += 1
 		view.pressed.connect(replay.bind(i))
 		view.size = Vector2.ONE * (CARD + PADDING)
 		add_child(view)
@@ -269,6 +283,9 @@ class CardView:
 
 	var symbols: StepSymbols
 	var card: Card
+	## For a STITCH card: the run of stitches it shows (one of _stitch_groups), kept here, as a
+	## card being freed may still draw after the next step's cards came.
+	var stitch := {}
 	## How far its animation has got, 0..1, and whether it is still waiting for its turn.
 	var t := 0.0
 	var waiting := true
@@ -430,12 +447,13 @@ class CardView:
 		draw_rect(cell, dim, false, 2.0)
 		for corner in [Vector2(0, 0), Vector2(1, 0), Vector2(0, 1), Vector2(1, 1)]:
 			draw_circle(cell.position + corner * side, 2.5, dim)
-		var starts := [0.05] if symbols._stitch_legs.size() == 1 else [0.05, 0.42]
-		for i in symbols._stitch_legs.size():
+		var legs: Array = stitch.legs
+		var starts := [0.05] if legs.size() == 1 else [0.05, 0.42]
+		for i in legs.size():
 			if t < starts[i]:
 				continue
-			var up := cell.position + symbols._stitch_legs[i][0] * side
-			var down := cell.position + symbols._stitch_legs[i][1] * side
+			var up: Vector2 = cell.position + legs[i][0] * side
+			var down: Vector2 = cell.position + legs[i][1] * side
 			draw_circle(up, 5.0, ink)
 			var grown := clampf((t - starts[i] - 0.08) / 0.27, 0.0, 1.0)
 			var direction := (down - up).normalized()
@@ -444,7 +462,7 @@ class CardView:
 			if grown >= 1.0:
 				draw_arc(down, 6.0, 0.0, TAU, 20, ink, 2.0)
 		var right := Rect2(cell.end.x, box.position.y, box.end.x - cell.end.x, box.size.y)
-		StepSymbols.draw_label(self, get_theme_default_font(), right.get_center(), "%d×" % symbols._stitch_count, FONT_SIZE + 2, ink)
+		StepSymbols.draw_label(self, get_theme_default_font(), right.get_center(), "%d×" % stitch.count, FONT_SIZE + 2, ink)
 
 
 	## Slow at both ends.
