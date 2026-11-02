@@ -118,6 +118,15 @@ func last_cell(thread: int) -> Vector2i:
 	return Vector2i(step.cells[-1], step.row)
 
 
+## The hole the needle last went down through in `thread` (a grid point, as StitchStyle gives
+## it), or (-1, -1) before its first step.
+func last_hole(thread: int) -> Vector2i:
+	var previous := _previous_done(thread)
+	if previous < 0:
+		return Vector2i(-1, -1)
+	return Vector2i(style.needle_holes(steps(thread)[previous])[-1].round())
+
+
 ## Changes the skip limit and replans every thread. Finished stitches stay finished: progress
 ## is taken over from the stitched cells.
 func set_max_skip(value: int) -> void:

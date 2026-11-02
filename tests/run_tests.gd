@@ -48,6 +48,7 @@ func _initialize() -> void:
 	_test_gestures()
 	_test_symbols_replay()
 	_test_symbols_stitch_runs()
+	_test_count_from_last_hole()
 	await _test_page_swipe()
 	if _failures == 0:
 		print("All tests passed.")
@@ -109,6 +110,36 @@ func _test_symbols_stitch_runs() -> void:
 				split += 1
 	_check(wrong == 0, "stitch cards add up to the step and show its legs (%d wrong)" % wrong)
 	_check(split > 0, "some sample steps start or end differently and get more than one stitch card")
+	symbols.free()
+
+
+## Counting starts at the hole the thread last went down through while the needle is at most the
+## limit of holes from it; further away at a findable stitch, and the symbol window warns.
+func _test_count_from_last_hole() -> void:
+	var pattern := _pattern(["0000....0000"])
+	var session := StitchSession.new(pattern)
+	session.set_english(true)  # Whole crosses: the next step starts over the gap, not on the way back.
+	session.set_max_block(4)
+	session.advance(0)
+	var step := session.current_step(0)
+	var needle := Vector2i(session.style.needle_holes(step)[0].round())
+	var last_hole := session.last_hole(0)
+	var hops := absi(needle.x - last_hole.x) + absi(needle.y - last_hole.y)
+	var near := PositionHint.find(pattern, session.cell_states(), step, session.last_cell(0), needle,
+			last_hole, hops)
+	_check(near != null and near.from_last_hole and near.start == last_hole and near.holes.size() == hops,
+			"within the limit counting starts at the last hole: %s" % [near.start if near else null])
+	var far := PositionHint.find(pattern, session.cell_states(), step, session.last_cell(0), needle,
+			last_hole, hops - 1)
+	_check(far != null and not far.from_last_hole, "beyond the limit a findable stitch is the reference")
+	_check(PositionHint.find(pattern, session.cell_states(), step, session.last_cell(0), needle,
+			Vector2i(-1, -1), 30).from_last_hole == false, "no last hole before the first step")
+	var symbols := StepSymbols.new()
+	symbols.show_step(step, far, session.style, false, false)
+	_check(symbols._cards.has(StepSymbols.Card.COUNT) and symbols._count_warning,
+			"the counting card warns when counting doesn't start at the last hole")
+	symbols.show_step(step, near, session.style, false, false)
+	_check(not symbols._count_warning, "no warning when counting starts at the last hole")
 	symbols.free()
 
 

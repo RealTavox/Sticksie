@@ -3,9 +3,9 @@ extends Control
 ## A picture for a setting in the symbol window's look (StepSymbols): white lines, dots, arrows and
 ## crosses, symbols rather than pictures of the real thing. In a ChoiceCards button it sits over
 ## the label; standing alone (`framed`) it draws its own see-through card and follows the
-## setting's current value (`corner`, `limit_on`, `style`).
+## setting's current value (`corner`, `limit_on`, `style`, `hole_limit`).
 
-enum Kind { TOUCH, MOUSE_KEYBOARD, DANISH, ENGLISH, CORNER, THREAD_LIMIT, STITCH_GUIDE }
+enum Kind { TOUCH, MOUSE_KEYBOARD, DANISH, ENGLISH, CORNER, THREAD_LIMIT, STITCH_GUIDE, HOLE_LIMIT }
 
 ## Height of a picture standing alone under its setting.
 const FRAMED_HEIGHT := 112.0
@@ -28,6 +28,11 @@ var corner := 0:
 var limit_on := false:
 	set(value):
 		limit_on = value
+		queue_redraw()
+## HOLE_LIMIT: how many holes from the last one counting still starts there.
+var hole_limit := PositionHint.DEFAULT_MAX_HOLES:
+	set(value):
+		hole_limit = value
 		queue_redraw()
 ## STITCH_GUIDE: the style whose needle holes it shows.
 var style := StitchStyle.new():
@@ -66,6 +71,8 @@ func _draw() -> void:
 			_draw_thread_limit(box)
 		Kind.STITCH_GUIDE:
 			_draw_stitch_guide(box)
+		Kind.HOLE_LIMIT:
+			_draw_hole_limit(box)
 
 
 ## A rounded outline.
@@ -239,6 +246,39 @@ func _draw_thread_limit(box: Rect2) -> void:
 	for x in bars:
 		var bar := Rect2(x - 2.5, y - 14.0, 5.0, 28.0)
 		draw_rect(bar, Color.WHITE)
+
+
+## Counting from the last hole: a stitch whose thread went down at a ring, from there an arrow over
+## the holes up to the limit to where the needle comes up (a dot), the limit over it; beyond it,
+## past a line, the warning sign of the symbol window and a marked cross to count from instead.
+func _draw_hole_limit(box: Rect2) -> void:
+	var side := minf(box.size.y * 0.5, 34.0)
+	var y := box.get_center().y + side * 0.3
+	var width := minf(box.size.x, box.size.y * 5.2)
+	var left := box.get_center().x - width / 2.0
+	# The last stitch, its leg going down at the top right hole.
+	var cell := Rect2(left, y - side, side, side)
+	draw_rect(cell, Color(DIM, 0.25), false, 1.5)
+	var down := Vector2(cell.end.x, cell.position.y)
+	StepSymbols.draw_arrow(self, Vector2(cell.position.x, cell.end.y), down - Vector2(4.0, -4.0), Color.WHITE, 3.0)
+	draw_arc(down, 6.0, 0.0, TAU, 20, Color.WHITE, 2.0)
+	# Its holes, as many as the limit (a symbol: at most eight drawn).
+	var dots := clampi(hole_limit, 1, 8)
+	var gap := (width * 0.62 - side) / dots
+	var needle := down + Vector2(gap * dots, 0.0)
+	for hole in dots:
+		draw_circle(down + Vector2(gap * (hole + 1), 0.0), 3.0 if hole < dots - 1 else 5.0, Color.WHITE)
+	StepSymbols.draw_arrow(self, down + Vector2(8.0, 0.0), needle - Vector2(8.0, 0.0), Color.WHITE, 2.5)
+	StepSymbols.draw_label(self, get_theme_default_font(), down.lerp(needle, 0.5) + Vector2(0.0, -14.0),
+			"bis %d" % hole_limit, NUMBER_FONT_SIZE + 3, Color.WHITE)
+	# Further: find a marked stitch first.
+	var rest := left + width * 0.74
+	draw_line(Vector2(rest, box.position.y + 6.0), Vector2(rest, box.end.y - 6.0), DIM, 1.5)
+	var sign_at := Vector2(left + width * 0.83, box.get_center().y)
+	StepSymbols.draw_warning(self, sign_at, 26.0, Color.WHITE)
+	var cross := Rect2(Vector2(left + width * 0.92, box.get_center().y) - Vector2.ONE * side * 0.35, Vector2.ONE * side * 0.7)
+	draw_line(cross.position, cross.end, Color.WHITE, THREAD_WIDTH)
+	draw_line(Vector2(cross.end.x, cross.position.y), Vector2(cross.position.x, cross.end.y), Color.WHITE, THREAD_WIDTH)
 
 
 ## A Danish pass over two cells as the style works it: every leg an arrow from the hole the needle

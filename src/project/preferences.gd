@@ -21,6 +21,16 @@ static func set_max_skip(value: int) -> void:
 	_store("max_skip", value)
 
 
+## Most holes from the one the thread last went down through that counting still starts there
+## (PositionHint.DEFAULT_MAX_HOLES by default); further away it starts at a findable stitch.
+static func max_hole_count() -> int:
+	return int(_load().get_value("stitching", "max_hole_count", PositionHint.DEFAULT_MAX_HOLES))
+
+
+static func set_max_hole_count(value: int) -> void:
+	_store("max_hole_count", value)
+
+
 ## Whether rows are worked from the top down (default) or from the bottom up.
 static func top_to_bottom() -> bool:
 	return bool(_load().get_value("stitching", "top_to_bottom", true))

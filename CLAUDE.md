@@ -26,7 +26,7 @@ item is resolved during normal work, delete its entry in the same change.
   MAY_BE_CLEARED / NOT_KEPT (no IndexedDB, e.g. a private window) and `warning()`: NOT_KEPT shows in the
   info line at start, both on top of the project list; `Preferences` app-wide settings in
   `settings.cfg` next to the projects (light direction and height in section `view`, default from the top left at 55°, set in the
-  developer tools; skip limit, start corner or automatic, stitch method, block size, the
+  developer tools; skip limit, how far counting starts at the last hole, start corner or automatic, stitch method, block size, the
   stitch style; not saved in the project file, pushed into the open project; plus the touch or
   desktop layout in section `ui`, default touch on phones and tablets, also in their browser
   (features `web_ios`, `web_android`), the UI-Skalierung (`ui_scale()`, the root window's
@@ -41,7 +41,10 @@ item is resolved during normal work, delete its entry in the same change.
   (`BackSide`: the thread between the needle holes, worked out from the planned steps; drawn
   mirrored by `PatternView.back_side`), where the needle comes up (`StitchStyle`, see Planner
   rules) and position hints
-  (`PositionHint`: the nearest findable stitch to count from, any colour: the last stitch
+  (`PositionHint`: counting starts at the hole the thread last went down through
+  (`StitchSession.last_hole()`, `from_last_hole`) when the needle comes up at most
+  `Preferences.max_hole_count()` holes from it (default `PositionHint.DEFAULT_MAX_HOLES` = 5,
+  counted along the path); further away at the nearest findable stitch to count from, any colour: the last stitch
   made or the end of a run, never a stitch in the middle of a row of equal stitches; before the
   very first stitch the nearest corner of the pattern, landmark `CORNER`; counting runs from hole to
   hole, `PositionHint.holes`, from the reference's hole nearest to the needle's first hole, or from
@@ -80,9 +83,9 @@ item is resolved during normal work, delete its entry in the same change.
   the settings window (`main.gd` `_build_settings_dialog()`): sections Bedienung, UI-Skalierung
   (shows at once like the light, Abbrechen puts it back), Symbolfenster
   (while on, a `StepSymbols.show_preview()` plays every card at the chosen tempo, a tap replays
-  one), Stichmethode, Anfangen in der Ecke, Stickführung, Fadenwechsel, then the developer tools;
+  one), Stichmethode, Anfangen in der Ecke, Stickführung, Zählen (the hole limit), Fadenwechsel, then the developer tools;
   two-sided choices (layout, method) are `ChoiceCards`, big buttons side by side with a picture
-  over the label, blue when chosen; the start corner, stitch guide and thread limit show a framed
+  over the label, blue when chosen; the start corner, stitch guide, hole limit and thread limit show a framed
   `SettingPicture` under them that follows the choice (the guide one draws a Danish pass over two
   cells with the chosen `StitchStyle`'s holes); both draw white symbols like `StepSymbols`, whose
   `draw_arrow()`/`draw_scissors()`/`draw_label()` they share,
@@ -142,7 +145,8 @@ item is resolved during normal work, delete its entry in the same change.
   standing; redrawn at most 30 times a second while playing: securing the old thread (needle
   under the back stitches, scissors cut and open again, so the still picture shows scissors), threading (the doubled thread through the eye of the
   user's needle, `ButtonIcons.needle_icon(…, true)` flat white), counting (an arrow per
-  direction with its count), starting with the loop (side view: the needle goes down through a
+  direction with its count; a warning sign, `draw_warning()`, when it doesn't start at the last
+  hole, also with nothing to count), starting with the loop (side view: the needle goes down through a
   hole and brings the loop, an arch with straight strands into the hole; up through the next
   hole, through the loop, back down the same hole) and the stitch (up hole, down hole, arrow,
   how many; a card per run of stitches worked alike, `_set_stitch()`, so a first stitch that comes
@@ -185,7 +189,7 @@ How to check a change; every fix and feature runs these. Godot binary:
 2. `$G --headless --path . --script res://tests/run_tests.gd`: prints "All tests passed."
    and exits 0. Plain checks without a framework (Lab/CIEDE2000 against Sharma's reference
    pairs, DMC palette, importing the sample, stitch planner incl. that every cell of the sample
-   is crossed exactly once, stitching progress, position hints and their wording, view gestures fed as touch events, incl. the swipe back dragging the page, replaying a tapped symbol card, a stitch card per run of alike stitches, the view keeping the step inside when its corner is far away, exporting and importing a project).
+   is crossed exactly once, stitching progress, position hints and their wording, view gestures fed as touch events, incl. the swipe back dragging the page, replaying a tapped symbol card, a stitch card per run of alike stitches, counting from the last hole within the limit and the warning beyond it, the view keeping the step inside when its corner is far away, exporting and importing a project).
 3. `$G --headless --path . --quit-after 120 -- --projects-dir=<scratch dir> --open=res://samples/hypsi_anhaenger.png --stitch=3837 --steps=7 2>&1 | grep -E "ERROR|WARNING"`:
    no output. Always pass `--projects-dir` with a scratch folder: every run that opens an image
    saves a project, and without it that lands in the user's real projects.
@@ -193,7 +197,7 @@ How to check a change; every fix and feature runs these. Godot binary:
    `$G --path . --resolution 720x1280 -- --projects-dir=<scratch dir> --open=res://samples/hypsi_anhaenger.png --screenshot=<abs path>.png`,
    and again with `1280x720` for landscape; look at the PNGs. Add `--stitch=<DMC code>
    --steps=<n>` for the stitching screen after n confirmed steps, `--max-skip=<n>` to set the
-   skip limit (-1: none), `--start=<auto|top-left|top-right|bottom-left|bottom-right>` the start corner, `--settings` to open the settings dialog, `--projects` the project list, `--back` the back side while stitching,
+   skip limit (-1: none), `--max-holes=<n>` how far counting starts at the last hole (saved), `--start=<auto|top-left|top-right|bottom-left|bottom-right>` the start corner, `--settings` to open the settings dialog, `--projects` the project list, `--back` the back side while stitching,
    `--method=<danish|english>`, `--back-pass=<whole|blocks>`, `--max-block=<n>`, `--needle=<auto|bottom|top>`, `--first-leg=<slash|backslash>`
    (both fix the style), `--dev-tools` with `--settings` for the developer tools, `--scroll=<px>` scrolls the open window (settings, project list) that far down before the screenshot, `--dev=<on|off>` the developer mode (saved), `--symbols=<on|off|still|animated>` the symbol window or its still pictures (saved) or
    `--symbols=<secure|thread|anchor|count|stitch>[,<0..1>]` to hold that card at that point of its animation, `--ui=<touch|desktop>` the layout, `--keys=<key>[:<seconds>],…` presses keys after the steps (OS key names, e.g. Tab, Space, BackSpace, Plus, D:0.4 held), `--ui-scale=<factor>` the UI-Skalierung (saved), `--import=<path>` imports an exported project, `--export=<path>` writes the open project's export there, `--storage=<safe|may-clear|not-kept>` fakes the browser storage's safety for the warnings,

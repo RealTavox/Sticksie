@@ -4,7 +4,8 @@ extends Control
 ## start the last project opens again.
 ##
 ## Command line (after `--`): `--projects-dir=<path>` keeps projects in another folder (for test
-## runs), `--open=<path>` opens an image as a new project, `--import=<path>` imports an exported
+## runs), `--max-holes=<n>` how far from the last hole counting still starts there (saved),
+## `--open=<path>` opens an image as a new project, `--import=<path>` imports an exported
 ## project file, `--export=<path>` writes the open project's export file there,
 ## `--storage=<safe|may-clear|not-kept>` pretends the browser keeps the projects that safely
 ## (BrowserStorage, for the warnings), `--max-skip=<n>` sets the skip limit
@@ -146,6 +147,8 @@ var _method_cards: ChoiceCards
 var _corner_picture: SettingPicture
 var _guide_picture: SettingPicture
 var _limit_picture: SettingPicture
+var _hole_spin: SpinBox
+var _hole_picture: SettingPicture
 var _symbols_preview: StepSymbols
 var _symbols_tip: Label
 var _whole_back_box: CheckBox
@@ -784,6 +787,28 @@ func _build_settings_dialog() -> void:
 	content.add_child(HSeparator.new())
 	_build_guide_settings(content)
 	content.add_child(HSeparator.new())
+	content.add_child(_make_heading("Zählen"))
+	var hole_row := HBoxContainer.new()
+	content.add_child(hole_row)
+	var hole_text := Label.new()
+	hole_text.text = "Vom letzten Loch des Fadens zählen bis"
+	hole_row.add_child(hole_text)
+	_hole_spin = SpinBox.new()
+	_hole_spin.min_value = 1
+	_hole_spin.max_value = 30
+	_hole_spin.value = PositionHint.DEFAULT_MAX_HOLES
+	_hole_spin.value_changed.connect(func(value: float) -> void: _hole_picture.hole_limit = int(value))
+	hole_row.add_child(_hole_spin)
+	var hole_unit := Label.new()
+	hole_unit.text = "Löcher"
+	hole_row.add_child(hole_unit)
+	_hole_picture = SettingPicture.new(SettingPicture.Kind.HOLE_LIMIT, true)
+	content.add_child(_hole_picture)
+	content.add_child(_make_note(("Bis dahin zählst du ab dem Loch, durch das dein Faden zuletzt nach "
+			+ "hinten ging. Liegt der nächste Stich weiter weg, zählst du ab einem markanten Stich, etwa "
+			+ "dem Ende einer Reihe; das Symbolfenster zeigt dann ein Warnschild. Empfohlen: %d.")
+			% PositionHint.DEFAULT_MAX_HOLES))
+	content.add_child(HSeparator.new())
 	content.add_child(_make_heading("Fadenwechsel"))
 	_limit_box = CheckBox.new()
 	_limit_box.text = "Faden automatisch wechseln, wenn er auf der Rückseite mehr als"
@@ -1376,6 +1401,8 @@ func _show_settings() -> void:
 	_ui_cards.selected = 0 if Preferences.touch_mode() else 1
 	var scales: Array = UI_SCALES.map(func(choice: Array) -> float: return choice[1])
 	_ui_scale_option.selected = maxi(scales.find(Preferences.ui_scale()), 0)
+	_hole_spin.value = Preferences.max_hole_count()
+	_hole_picture.hole_limit = Preferences.max_hole_count()
 	var limit := Preferences.max_skip()
 	_limit_box.button_pressed = limit != StitchPlanner.UNLIMITED
 	_limit_spin.editable = _limit_box.button_pressed
@@ -1423,6 +1450,7 @@ func _apply_settings() -> void:
 	Preferences.set_ui_scale(UI_SCALES[_ui_scale_option.selected][1])
 	var limit := int(_limit_spin.value) if _limit_box.button_pressed else StitchPlanner.UNLIMITED
 	Preferences.set_max_skip(limit)
+	Preferences.set_max_hole_count(int(_hole_spin.value))
 	var corner: Array = START_CORNERS[_corner_option.selected]
 	Preferences.set_direction(corner[1], corner[2], corner[3])
 	Preferences.set_english(_method_cards.selected == 1)
@@ -1910,7 +1938,8 @@ func _refresh_stitching() -> void:
 	var thread_start := StitchSession.ThreadStart.NONE
 	if step != null:
 		hint = PositionHint.find(pattern, states, step, session.last_cell(thread),
-				Vector2i(_style.needle_holes(step)[0].round()))
+				Vector2i(_style.needle_holes(step)[0].round()), session.last_hole(thread),
+				Preferences.max_hole_count())
 		thread_start = session.thread_start(thread, session.current_index(thread))
 		position_text = StitchPanel.describe_position(step, hint, pattern, states, _style)
 		var thread_text := StitchPanel.describe_thread(step, thread_start, session.max_skip)
@@ -2103,6 +2132,8 @@ func _handle_cmdline() -> void:
 			_restore_light()
 		elif arg == "--projects":
 			_show_projects.call_deferred()
+		elif arg.begins_with("--max-holes="):
+			Preferences.set_max_hole_count(arg.trim_prefix("--max-holes=").to_int())
 		elif arg.begins_with("--max-skip="):
 			Preferences.set_max_skip(arg.trim_prefix("--max-skip=").to_int())
 			if _project != null:

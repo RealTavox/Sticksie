@@ -169,6 +169,8 @@ static func describe_position(step: StitchStep, hint: PositionHint, pattern: Pat
 			text += describe_count(hint.count(), "dem Eckloch")
 	elif maxi(absi(hint.offset().x), absi(hint.offset().y)) <= 1:
 		text = describe_offset(hint.offset(), describe_reference(hint, pattern, states))
+	elif hint.from_last_hole:
+		text = describe_count(hint.count(), "dem Loch, durch das dein Faden zuletzt nach hinten ging")
 	else:
 		text = describe_count(hint.count(), "dem nächsten Loch an " + describe_reference(hint, pattern, states))
 	var corner := describe_corner(step, style)

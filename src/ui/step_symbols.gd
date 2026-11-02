@@ -5,7 +5,8 @@ extends Control
 ## one card after the other from left to right, then stays: securing the old thread (the needle
 ## goes under the stitches on the back, then scissors cut it), threading a new one (the doubled
 ## thread goes through the needle's eye), counting holes (an arrow per direction with its
-## count), starting the thread with the loop (down through a hole bringing the loop, up through
+## count, with a warning sign when it doesn't start at the hole the thread last went down through,
+## so the user knows to look for the reference first), starting the thread with the loop (down through a hole bringing the loop, up through
 ## the next, through the loop and back down) and the stitch itself (one leg from the hole where the needle comes up to
 ## where it goes down, and how many; a card per run of stitches worked alike, so a first stitch
 ## that comes up elsewhere gets its own card before the rest). Symbols, not pictures: only white lines, dots and numbers
@@ -54,8 +55,10 @@ var _since_draw := 0.0
 var _held := false
 ## Cards played again after a tap: their index -> seconds into that replay.
 var _replays := {}
-## COUNT: the counting legs in holes, in order.
+## COUNT: the counting legs in holes, in order, and whether counting starts somewhere else than
+## the hole the thread last went down through (a warning sign).
 var _legs: Array[Vector2i] = []
+var _count_warning := false
 ## STITCH cards, one per run of stitches worked alike, in order: `legs` per leg its up and down
 ## hole within the cell (0 or 1 on each axis), `count` how many stitches in a row.
 var _stitch_groups: Array[Dictionary] = []
@@ -87,8 +90,9 @@ func show_step(step: StitchStep, hint: PositionHint, style: StitchStyle, new_thr
 	if step != null:
 		if new_thread:
 			_cards.append(Card.THREAD)
-		if hint != null and hint.holes.size() >= 2:
+		if hint != null and (hint.holes.size() >= 2 or not hint.from_last_hole):
 			_cards.append(Card.COUNT)
+			_count_warning = not hint.from_last_hole
 			_legs.clear()
 			for leg in [hint.bend() - hint.start, hint.needle - hint.bend()]:
 				if leg != Vector2i.ZERO:
@@ -105,6 +109,7 @@ func show_step(step: StitchStep, hint: PositionHint, style: StitchStyle, new_thr
 func show_preview() -> void:
 	_cards = [Card.SECURE, Card.THREAD, Card.COUNT, Card.ANCHOR, Card.STITCH]
 	_legs = [Vector2i(3, 0), Vector2i(0, 2)]
+	_count_warning = false
 	_set_stitch(StitchStep.new(StitchStep.Kind.CROSS, 0, 0, PackedInt32Array([0]), 0), StitchStyle.new())
 	_stitch_groups[0].count = 5
 	_build_views()
@@ -257,6 +262,17 @@ static func draw_scissors(canvas: CanvasItem, pivot: Vector2, direction: Vector2
 
 
 ## An arrow on `canvas` from `from` to `to`, its head at `to`.
+## A warning sign: a white triangle `side` wide with its tip up, an exclamation mark cut into it.
+static func draw_warning(canvas: CanvasItem, center: Vector2, side: float, ink: Color) -> void:
+	var height := side * 0.87
+	var top := center + Vector2(0.0, -height / 2.0)
+	canvas.draw_colored_polygon(PackedVector2Array([top, center + Vector2(side / 2.0, height / 2.0),
+			center + Vector2(-side / 2.0, height / 2.0)]), ink)
+	var mark := Color(GAP_COLOR, ink.a)
+	canvas.draw_line(top + Vector2(0.0, height * 0.36), top + Vector2(0.0, height * 0.68), mark, side * 0.11)
+	canvas.draw_circle(top + Vector2(0.0, height * 0.83), side * 0.065, mark)
+
+
 static func draw_arrow(canvas: CanvasItem, from: Vector2, to: Vector2, ink: Color, width := LINE_WIDTH) -> void:
 	var length := from.distance_to(to)
 	if length < 1.0:
@@ -384,8 +400,11 @@ class CardView:
 
 
 	## Counting: from a ring (where counting starts) an arrow per direction grows over its holes, then
-	## its count shows beside it.
+	## its count shows beside it. A warning sign in the corner when counting doesn't start at the
+	## hole the thread last went down through.
 	func _draw_count(box: Rect2, t: float, ink: Color) -> void:
+		if symbols._count_warning:
+			StepSymbols.draw_warning(self, box.position + Vector2(9.0, 8.0), 20.0, ink)
 		var points: Array[Vector2] = [Vector2.ZERO]
 		for i in symbols._legs.size():
 			points.append(points[-1] + Vector2(symbols._legs[i].sign()) * (1.0 if i == 0 else 0.7))
@@ -394,14 +413,18 @@ class CardView:
 		for point in points:
 			low = low.min(point)
 			high = high.max(point)
-		# Room round the arrows for the numbers.
+		# Room round the arrows for the numbers (and the warning sign at the top left).
 		var inner := box.grow(-16.0)
+		if symbols._count_warning:
+			inner = inner.grow_individual(-6.0, -12.0, 0.0, 0.0)
 		var extent := high - low
 		var scale := INF
 		if extent.x > 0.0:
 			scale = inner.size.x / extent.x
 		if extent.y > 0.0:
 			scale = minf(scale, inner.size.y / extent.y)
+		if scale == INF:
+			scale = 1.0  # Nothing to count: just the ring.
 		var offset := inner.get_center() - (low + high) / 2.0 * scale
 		var font := get_theme_default_font()
 		var start := points[0] * scale + offset

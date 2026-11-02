@@ -11,6 +11,14 @@ extends RefCounted
 ## Counting goes from hole to hole (the needle holes at the cells' corners): from the reference
 ## stitch's hole nearest to where the needle comes up, or from the pattern's corner hole itself
 ## before the first stitch, to the needle's hole.
+##
+## Mostly none of that is needed: the needle comes up near the hole the thread last went down
+## through, which the user can't miss, so counting starts there whenever the needle is at most
+## a limit of holes from it (Preferences.max_hole_count(), DEFAULT_MAX_HOLES).
+
+## How many holes from the last one the thread went down through counting still starts there,
+## unless the user chose another limit.
+const DEFAULT_MAX_HOLES := 5
 
 enum Landmark {
 	## The stitch just made; the needle is there.
@@ -35,6 +43,9 @@ var needle: Vector2i
 ## Holes to count, from the one after `start` to `needle`: first along the longer direction,
 ## then along the shorter one.
 var holes: Array[Vector2i] = []
+## Whether counting starts at the hole the thread last went down through. Otherwise the user has
+## to find the reference first, and the symbol window warns.
+var from_last_hole := false
 
 
 ## The hint for `step`, given the cell states (StitchSession.Cell per cell) before it and the
@@ -42,12 +53,26 @@ var holes: Array[Vector2i] = []
 ## first (StitchStyle.needle_holes(); by default the first cell's top left). Null for a return
 ## pass (it runs back over its own half stitches). When nothing is stitched yet, the reference
 ## is the corner of the pattern nearest to the step (on a tie: top before bottom, left before
-## right).
+## right). `last_hole` is the hole the thread last went down through ((-1, -1) if none): when the
+## needle is at most `max_holes` holes from it (counted along the counting path), counting starts
+## there and the reference is the last stitch.
 static func find(pattern: Pattern, states: PackedByteArray, step: StitchStep,
-		last_cell := Vector2i(-1, -1), needle_hole := Vector2i(-1, -1)) -> PositionHint:
+		last_cell := Vector2i(-1, -1), needle_hole := Vector2i(-1, -1), last_hole := Vector2i(-1, -1),
+		max_holes := -1) -> PositionHint:
 	if step.kind == StitchStep.Kind.BACK:
 		return null
 	var target := Vector2i(step.cells[0], step.row)
+	var needle := needle_hole if needle_hole.x >= 0 else target
+	if last_hole.x >= 0 and last_cell.x >= 0 and _hops(last_hole, needle) <= max_holes:
+		var near := PositionHint.new()
+		near.target = target
+		near.needle = needle
+		near.reference = last_cell
+		near.landmark = Landmark.LAST
+		near.start = last_hole
+		near.from_last_hole = true
+		near.holes = _counting_path(last_hole, needle)
+		return near
 	var best := Vector2i(-1, -1)
 	var best_landmark := Landmark.LAST
 	var best_cost := INF
@@ -81,7 +106,7 @@ static func find(pattern: Pattern, states: PackedByteArray, step: StitchStep,
 				best_landmark = landmark
 	var hint := PositionHint.new()
 	hint.target = target
-	hint.needle = needle_hole if needle_hole.x >= 0 else target
+	hint.needle = needle
 	if best.x < 0:
 		var left := target.x * 2 <= pattern.width - 1
 		var top := target.y * 2 <= pattern.height - 1
