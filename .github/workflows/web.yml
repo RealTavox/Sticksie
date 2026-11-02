@@ -1,11 +1,12 @@
 # Tests the project and exports it as a web page (preset "Web" in export_presets.cfg,
-# without threads, so it needs no special server headers). Pushes to main are published
-# on GitHub Pages; pull requests only build.
+# without threads, so it needs no special server headers). Only version tags (v*) are
+# published on GitHub Pages; pushes to main and pull requests only build.
 name: Web
 
 on:
   push:
     branches: [main]
+    tags: ['v*']
   pull_request:
   workflow_dispatch:
 
@@ -73,7 +74,7 @@ jobs:
           path: build/web
 
   deploy:
-    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    if: startsWith(github.ref, 'refs/tags/v')
     needs: build
     runs-on: ubuntu-latest
     permissions:

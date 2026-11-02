@@ -222,8 +222,9 @@ input a `DataTransfer` file and catching the download link's `click()`. Resuming
 
 CI: `.github/workflows/web.yml` runs steps 1 and 2 and the web export on Linux with
 Godot `GODOT_VERSION` (keep it in step with the local binary; Godot and the web template are
-cached), on every push and pull request; pushes to `main` are published on GitHub Pages
-(repo setting Pages → Source "GitHub Actions").
+cached), on pushes to `main`, pull requests and version tags; only a pushed tag `v*` is
+published on GitHub Pages (repo setting Pages → Source "GitHub Actions"; the `github-pages`
+environment must allow the tag pattern `v*`).
 
 ### Save format
 
