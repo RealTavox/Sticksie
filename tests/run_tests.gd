@@ -59,6 +59,7 @@ func _initialize() -> void:
 	await _test_tapped_cell()
 	_test_overview_switch()
 	_test_color_question()
+	_test_tutorial()
 	if _failures == 0:
 		print("All tests passed.")
 	else:
@@ -1402,6 +1403,77 @@ func _test_overview_switch() -> void:
 	_check(switch._motif_button.button_pressed and not switch._progress_button.button_pressed,
 			"setting it from outside moves the buttons, got no signal: %s" % [changes])
 	switch.free()
+
+
+## The introduction: pages per layout and in that layout's words, every page can be skipped and
+## returned to, and it ends by its last page or by cancelling, each saying so once.
+func _test_tutorial() -> void:
+	var touch_pages := Tutorial.pages_for(true)
+	var desktop_pages := Tutorial.pages_for(false)
+	_check(touch_pages.size() == desktop_pages.size() + 1, "only touch explains the round buttons")
+	for entry in touch_pages:
+		_check(TutorialScene.SECONDS.has(entry.scene) and not entry.text.is_empty(), "touch page %s is complete" % entry.title)
+		_check(not ("klick" in entry.text.to_lower() or "taste" in entry.text.to_lower()), "%s speaks of touches" % entry.title)
+	for entry in desktop_pages:
+		_check(TutorialScene.SECONDS.has(entry.scene) and not entry.text.is_empty(), "desktop page %s is complete" % entry.title)
+		_check(not ("tipp" in entry.text.to_lower() or "wisch" in entry.text.to_lower() or "finger" in entry.text.to_lower()),
+				"%s speaks of mouse and keys" % entry.title)
+	_check("Kreuz für Kreuz" in Tutorial.pages_for(true, true)[3].text, "the English method gets its own words")
+
+	var tutorial := Tutorial.new()
+	root.add_child(tutorial)
+	var closes := [0]
+	tutorial.closed.connect(func() -> void: closes[0] += 1)
+	tutorial.setup(true)
+	tutorial._open = true
+	_check(tutorial.back_button.disabled, "nothing to return to on the first page")
+	for i in touch_pages.size() - 1:
+		_check(tutorial.page == i and closes[0] == 0, "Weiter goes to page %d" % i)
+		tutorial.next_button.pressed.emit()
+	_check(tutorial.page == touch_pages.size() - 1 and not tutorial.cancel_button.visible, "the last page has nothing left to cancel")
+	tutorial.back_button.pressed.emit()
+	_check(tutorial.page == touch_pages.size() - 2 and tutorial.cancel_button.visible, "Zurück returns a page")
+	tutorial.next_button.pressed.emit()
+	tutorial.next_button.pressed.emit()
+	_check(closes[0] == 1 and not tutorial.is_open(), "Weiter on the last page ends it")
+
+	tutorial.setup(false)
+	tutorial._open = true
+	_check(tutorial.page == 0 and tutorial.pages.size() == desktop_pages.size(), "it starts over for the chosen layout")
+	tutorial.next_button.pressed.emit()
+	tutorial.cancel_button.pressed.emit()
+	_check(closes[0] == 2 and not tutorial.is_open(), "Abbrechen ends it from any page")
+
+	tutorial.setup(true)
+	tutorial._open = true
+	var swipe := func(from: Vector2, to: Vector2) -> void:
+		for pressed in [true, false]:
+			var event := InputEventMouseButton.new()
+			event.button_index = MOUSE_BUTTON_LEFT
+			event.pressed = pressed
+			event.position = from if pressed else to
+			tutorial._on_stage_input(event)
+	swipe.call(Vector2(200, 50), Vector2(100, 55))
+	_check(tutorial.page == 1, "a swipe to the left turns the page")
+	swipe.call(Vector2(100, 50), Vector2(200, 55))
+	_check(tutorial.page == 0, "a swipe to the right returns")
+	tutorial._scene._time = 1.0
+	swipe.call(Vector2(100, 50), Vector2(102, 51))
+	_check(tutorial.page == 0 and tutorial._scene._time == 0.0, "a tap plays the picture again")
+	for i in touch_pages.size():
+		swipe.call(Vector2(200, 50), Vector2(100, 55))
+	_check(tutorial.is_open() and tutorial.page == touch_pages.size() - 1, "a swipe doesn't end it by accident")
+	tutorial.free()
+
+	var directory := ProjectStore.directory
+	ProjectStore.directory = "user://test_tutorial_prefs"
+	DirAccess.remove_absolute(Preferences.path())
+	_check(not Preferences.tutorial_seen(), "unseen on a first start")
+	Preferences.set_tutorial_seen(true)
+	_check(Preferences.tutorial_seen(), "seen stays saved")
+	DirAccess.remove_absolute(Preferences.path())
+	DirAccess.remove_absolute(ProjectStore.directory)
+	ProjectStore.directory = directory
 
 
 func _test_color_question() -> void:

@@ -183,6 +183,15 @@ static func set_stitch_panels(list_open: bool, text_open: bool) -> void:
 	_store("stitch_text_open", text_open, "ui")
 
 
+## Whether the introduction was seen to its end or cancelled; until then it opens by itself.
+static func tutorial_seen() -> bool:
+	return bool(_load().get_value("ui", "tutorial_seen", false))
+
+
+static func set_tutorial_seen(value: bool) -> void:
+	_store("tutorial_seen", value, "ui")
+
+
 ## Developer mode (Entwicklertools in the settings): shows the developer button under the menu
 ## button. Only in debug builds; release builds leave the developer tools out.
 static func developer_mode() -> bool:

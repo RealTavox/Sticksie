@@ -136,6 +136,17 @@ func is_open() -> bool:
 	return _open
 
 
+func set_title(text: String) -> void:
+	_title.text = text
+
+
+## How much of the screen behind the panel shows through: pictures need less of it.
+func set_panel_alpha(alpha: float) -> void:
+	var style := panel_style()
+	style.bg_color.a = alpha
+	_panel.add_theme_stylebox_override("panel", style)
+
+
 ## Scrolls the content `pixels` down (for screenshots).
 func scroll_to(pixels: int) -> void:
 	_scroll.scroll_vertical = pixels

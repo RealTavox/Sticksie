@@ -24,7 +24,9 @@ extends Control
 ## list, `--picker-view=<list,project>` shows it as a list and/or only the project's colours,
 ## and `--pick=<code>` chooses a colour in it. `--overview=<motif|progress>` sets what the overview
 ## shows, `--ask-cell=<x>,<y>` taps that cell there (the question which colour to stitch), and
-## `--confirm` presses its OK.
+## `--confirm` presses its OK. `--first-run` opens the introduction as a first start does (any other
+## command line keeps it shut, or test runs would all stop at it), `--tutorial[=<page>[,<0..1>]]`
+## opens it at that page (from 1), held at that point of its animation.
 ##
 ## Two layouts (Preferences.touch_mode()): desktop has a toolbar on top and a side panel; touch
 ## shows the pattern on the whole screen with three round buttons: the menu (the toolbar,
@@ -256,6 +258,7 @@ var _overview_switch: OverviewSwitch
 var _overview_switch_placed := false
 var _overview_switch_tween: Tween
 var _color_question: ColorQuestion
+var _tutorial: Tutorial
 
 
 func _ready() -> void:
@@ -280,6 +283,9 @@ func _ready() -> void:
 			await _open_project(last)
 	if BrowserStorage.safety == BrowserStorage.Safety.NOT_KEPT:
 		_show_message(BrowserStorage.warning())
+	var args := OS.get_cmdline_user_args()
+	if (args.is_empty() or args.has("--first-run")) and not Preferences.tutorial_seen():
+		_show_tutorial(_touch)
 	_handle_cmdline()
 
 
@@ -399,6 +405,13 @@ func _build_ui() -> void:
 	_legal_window = LegalWindow.new()
 	_legal_window.closed.connect(_restore_overlays)
 	add_child(_legal_window)
+	# After the settings: started from there it opens over them, and they are still there after it.
+	_tutorial = Tutorial.new()
+	_tutorial.closed.connect(func() -> void:
+		Preferences.set_tutorial_seen(true)
+		if not _settings_dialog.is_open():
+			_restore_overlays())
+	add_child(_tutorial)
 	_loading = LoadingHint.new()
 	add_child(_loading)
 
@@ -766,6 +779,9 @@ func _build_settings_dialog() -> void:
 	_ui_cards = ChoiceCards.new([["Touch", SettingPicture.Kind.TOUCH],
 			["Maus + Tastatur", SettingPicture.Kind.MOUSE_KEYBOARD]])
 	content.add_child(_ui_cards)
+	# For the layout chosen above, even if not applied yet.
+	content.add_child(OverlayWindow.make_button("Einführung neu starten", ButtonIcons.Icon.INFO,
+			func() -> void: _show_tutorial(_ui_cards.selected == 0)))
 	content.add_child(HSeparator.new())
 	content.add_child(_make_heading("UI-Skalierung"))
 	_ui_scale_option = _make_option(UI_SCALES.map(func(choice: Array) -> String: return choice[0]))
@@ -1686,6 +1702,12 @@ func _show_info() -> void:
 	_info_label.text = text
 
 
+## Opens the introduction at its first page, for the given layout.
+func _show_tutorial(touch: bool) -> void:
+	_tutorial.setup(touch, Preferences.english())
+	_open_window(_tutorial)
+
+
 func _show_legal() -> void:
 	_open_window(_legal_window)
 
@@ -2312,8 +2334,13 @@ func _handle_cmdline() -> void:
 	var overview := ""
 	var ask_cell := PackedStringArray()
 	var confirm := false
+	var tutorial := PackedStringArray()
 	for arg in OS.get_cmdline_user_args():
-		if arg.begins_with("--open="):
+		if arg == "--tutorial":
+			tutorial = PackedStringArray(["1"])
+		elif arg.begins_with("--tutorial="):
+			tutorial = arg.trim_prefix("--tutorial=").split(",")
+		elif arg.begins_with("--open="):
 			await _open_image(arg.trim_prefix("--open="))
 		elif arg.begins_with("--import="):
 			var import_path := arg.trim_prefix("--import=")
@@ -2505,9 +2532,15 @@ func _handle_cmdline() -> void:
 	if finale and _project != null:
 		await get_tree().process_frame
 		_show_finale()
+	if not tutorial.is_empty():
+		_show_tutorial(_touch)
+		_tutorial.go_to(tutorial[0].to_int() - 1, false)
+		if tutorial.size() > 1:
+			_tutorial.hold(tutorial[1].to_float())
 	if screenshot_path.is_empty():
 		return
 	while (not _overlay_moving.is_empty() or _view.is_panning() or _view.is_page_sliding()
+			or _tutorial.is_animating()
 			or _settings_dialog.is_animating()
 			or _project_browser.is_animating()
 			or _legal_window.is_animating()
