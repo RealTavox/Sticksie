@@ -69,13 +69,17 @@ item is resolved during normal work, delete its entry in the same change.
   flip; gestures for touch and mouse: one or two fingers / right mouse drag pan, pinch / wheel
   zoom, tap = next (held back `DOUBLE_TAP_SECONDS` to rule out a double tap), double tap = back,
   two-finger double tap / double right click = new thread, swipe in from the right edge = flip,
-  from the left edge = overview (while stitching it drags the page along with the finger over a
+  from the left edge = overview (tap in the overview: `tapped_cell()`, the cell under it, `cell_at()`; while stitching it drags the page along with the finger over a
   picture of the overview, `back_page`, and goes or springs back on release; `slide_in()` /
   `slide_back()` play the same move for entering stitching and the Übersicht button, and the
   overview's zoom is put back on return); `set_covered()` keeps steps clear of overlays;
   `ensure_visible()` shows the step with its reference unless that pushes the step into the
   outer `STEP_EDGE_SHARE` of the view, then it centres the step and the counting path runs off
-  screen), `StitchPanel`
+  screen), `OverviewSwitch` the two buttons top right in the overview (below the open menu, under the round
+  button when too wide): Gesamtmotiv or Aktueller Stand (`main.gd` `_set_overview_progress()`, Tab too; `_overview_states()`;
+  not saved, each project opens with the motif; while stitching hidden), `ColorQuestion` the window a tap on a cell of a colour in the
+  overview opens, in both views, also on a cell not stitched yet (`main.gd` `_ask_stitching()`): colour, how far it has come, Abbrechen and a blue OK with the
+  needle (`OverlayWindow.set_needle_icon()`, as the colour list's button), which starts that colour, `StitchPanel`
   step guidance (texts in `info`, buttons in `controls`, so the touch layout can split them),
   `RoundButton` the round see-through touch buttons (lit by `round_button.gdshader` from the
   same light as the fabric, `tint_color` when on: the block colour while stitching, blue in the overview, symbols from `ButtonIcons` distance functions, tooltip on long press; `ButtonIcons.button_icon()`
@@ -118,7 +122,7 @@ item is resolved during normal work, delete its entry in the same change.
   (`StitchPanel.DESKTOP_HINT`, `KEYS_HINT` under the colour list). Keys in any layout
   (`_unhandled_key_input()`, not with Ctrl/Cmd/Alt): + / − zoom (`PatternView.zoom_by()`), WASD and
   the arrows move the view while held (`_process()`, `pan_by()`); while stitching Space next,
-  Backspace / Delete back, Enter new thread, Tab front/back, Q overview. The colour list's
+  Backspace / Delete back, Enter new thread, Tab front/back, Q overview; in the overview Tab motif/progress. The colour list's
   content is fitted again whenever its minimum size changes (wrapped labels first measure at no
   width), `ProgressStrip` the progress bar
   between the bottom round buttons (mouse and keyboard: along the whole bottom): grey capsule track, capsule fill
@@ -204,7 +208,7 @@ How to check a change; every fix and feature runs these. Godot binary:
 2. `$G --headless --path . --script res://tests/run_tests.gd`: prints "All tests passed."
    and exits 0. Plain checks without a framework (Lab/CIEDE2000 against Sharma's reference
    pairs, DMC palette, importing the sample, reading every image format incl. GIF, coarse matching of many colours, progress without planning, stitch planner incl. that every cell of the sample
-   is crossed exactly once, stitching progress, position hints and their wording, view gestures fed as touch events, incl. the swipe back dragging the page, replaying a tapped symbol card, a stitch card per run of alike stitches, counting from the last hole within the limit and the warning beyond it, the view keeping the step inside when its corner is far away, exporting and importing a project).
+   is crossed exactly once, stitching progress, position hints and their wording, view gestures fed as touch events, incl. the swipe back dragging the page, replaying a tapped symbol card, a stitch card per run of alike stitches, counting from the last hole within the limit and the warning beyond it, the view keeping the step inside when its corner is far away, the tapped cell, the overview's switch and the colour question, exporting and importing a project).
 3. `$G --headless --path . --quit-after 120 -- --projects-dir=<scratch dir> --open=res://samples/hypsi_anhaenger.png --stitch=3837 --steps=7 2>&1 | grep -E "ERROR|WARNING"`:
    no output. Always pass `--projects-dir` with a scratch folder: every run that opens an image
    saves a project, and without it that lands in the user's real projects.
@@ -216,7 +220,7 @@ How to check a change; every fix and feature runs these. Godot binary:
    `--method=<danish|english>`, `--back-pass=<whole|blocks>`, `--max-block=<n>`, `--needle=<auto|bottom|top>`, `--first-leg=<slash|backslash>`
    (both fix the style), `--dev-tools` with `--settings` for the developer tools, `--scroll=<px>` scrolls the open window (settings, project list) that far down before the screenshot, `--dev=<on|off>` the developer mode (saved), `--symbols=<on|off|still|animated>` the symbol window or its still pictures (saved) or
    `--symbols=<secure|thread|anchor|count|stitch>[,<0..1>]` to hold that card at that point of its animation, `--ui=<touch|desktop>` the layout, `--keys=<key>[:<seconds>],…` presses keys after the steps (OS key names, e.g. Tab, Space, BackSpace, Plus, D:0.4 held), `--ui-scale=<factor>` the UI-Skalierung (saved), `--import=<path>` imports an exported project, `--export=<path>` writes the open project's export there, `--storage=<safe|may-clear|not-kept>` fakes the browser storage's safety for the warnings,
-   `--overlays=<menu,pin,list,text>` opens touch overlays, `--picker=<code>` the colour picker
+   `--overview=<motif|progress>` what the overview shows, `--ask-cell=<x>,<y>` the question for that cell (`--confirm` presses its OK), `--overlays=<menu,pin,list,text>` opens touch overlays, `--picker=<code>` the colour picker
    for a colour of the list, `--picker-view=<list,project>` its list view and/or project filter, `--pick=<code>` chooses a colour in it, `--tooltip=<menu|list|text>` shows a
    round button's tooltip, `--safe-area=<l>,<t>,<r>,<b>` fakes a notch or island (canvas px), `--finish` stitches the rest of the `--stitch` colour (the celebration comes in), `--dismiss` taps it away to the overview, `--finale` shows the finished-project show, `--wait=<seconds>` waits that long before the screenshot (e.g. into the bar's fill; otherwise screenshots wait for the fill), `--zoom=<cell px>`
    to zoom in on the current step, `--light=<azimuth>,<elevation>` (degrees; azimuth clockwise

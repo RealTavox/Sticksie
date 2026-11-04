@@ -56,6 +56,9 @@ func _initialize() -> void:
 	_test_symbols_stitch_runs()
 	_test_count_from_last_hole()
 	await _test_page_swipe()
+	await _test_tapped_cell()
+	_test_overview_switch()
+	_test_color_question()
 	if _failures == 0:
 		print("All tests passed.")
 	else:
@@ -1358,6 +1361,63 @@ func _test_page_swipe() -> void:
 	await create_timer(PatternView.PAGE_SECONDS + 0.2).timeout
 	_check(swiped[0] == 1 and view._page_shift == 400.0, "a long swipe back goes all the way")
 	view.free()
+
+
+## A tap reports the cell under the finger; it is the cell seen on screen, mirrored on the back.
+func _test_tapped_cell() -> void:
+	var view := PatternView.new()
+	root.add_child(view)
+	view.size = Vector2(400, 400)
+	var pattern := Pattern.new()
+	pattern.width = 4
+	pattern.height = 2
+	pattern.cells = PackedInt32Array([0, 0, 0, 0, 0, 0, 0, 0])
+	view.pattern = pattern
+	view.set_view_state([Vector2(100, 100), 10.0, view.size])
+	_check(view.cell_at(Vector2(100, 100)) == Vector2i(0, 0), "the top left corner is cell 0, 0")
+	_check(view.cell_at(Vector2(135, 115)) == Vector2i(3, 1), "a point inside the last cell")
+	for outside: Vector2 in [Vector2(99, 105), Vector2(140, 105), Vector2(105, 99), Vector2(105, 120)]:
+		_check(view.cell_at(outside) == Vector2i(-1, -1), "beside the pattern is no cell: %s" % outside)
+	var taps := [0]
+	view.tapped.connect(func() -> void: taps[0] += 1)
+	_touch(view, 0, Vector2(125, 105), true)
+	_touch(view, 0, Vector2(125, 105), false)
+	await create_timer(PatternView.DOUBLE_TAP_SECONDS + 0.1).timeout
+	_check(taps[0] == 1 and view.tapped_cell() == Vector2i(2, 0), "a tap reports its cell, got %s" % view.tapped_cell())
+	view._back_side = true
+	_check(view.cell_at(Vector2(105, 105)) == Vector2i(3, 0), "the back is mirrored")
+	view.free()
+
+
+func _test_overview_switch() -> void:
+	var switch := OverviewSwitch.new()
+	root.add_child(switch)
+	var changes: Array[bool] = []
+	switch.progress_changed.connect(func(on: bool) -> void: changes.append(on))
+	_check(not switch.progress and switch._motif_button.button_pressed, "the switch starts on the motif")
+	switch._progress_button.pressed.emit()
+	switch._progress_button.pressed.emit()
+	_check(switch.progress and changes == [true], "choosing the progress reports it once")
+	switch.progress = false
+	_check(switch._motif_button.button_pressed and not switch._progress_button.button_pressed,
+			"setting it from outside moves the buttons, got no signal: %s" % [changes])
+	switch.free()
+
+
+func _test_color_question() -> void:
+	_check(ColorQuestion.status_text(0, 1) == "1 Stich", "one stitch")
+	_check(ColorQuestion.status_text(0, 12) == "12 Stiche", "no stitch done yet")
+	_check(ColorQuestion.status_text(3, 12) == "3 von 12 Stichen gestickt.", "some stitches done")
+	_check(ColorQuestion.status_text(12, 12) == "Schon fertig gestickt.", "colour finished")
+	var question := ColorQuestion.new()
+	root.add_child(question)
+	var confirmed: Array[int] = []
+	question.confirmed.connect(func(thread: int) -> void: confirmed.append(thread))
+	question.ask(FlossPalette.dmc().find_code("310"), 4, 0, 12)
+	question.ok_button.pressed.emit()
+	_check(confirmed == [4], "OK reports the thread asked about")
+	_check(question.ok_button.icon != null and question.ok_button.text == "OK", "OK carries the needle")
+	question.free()
 
 
 ## The first step of a colour is shown with the corner it is counted from, as long as that leaves

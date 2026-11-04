@@ -164,6 +164,8 @@ var _gesture_edge := 0
 var _tap_pending := false
 var _tap_count := 0
 var _tap_position := Vector2.ZERO
+## The cell under the tap that `tapped` reports (see tapped_cell()).
+var _tap_cell := Vector2i(-1, -1)
 var _two_finger_tap_msec := -100000
 ## Parts of the view covered by overlays (top and bottom, in pixels): steps are kept clear of them.
 var _cover_top := 0.0
@@ -204,13 +206,14 @@ func run_prepare(until_usec: int) -> bool:
 	return _scene.run_prepare(until_usec)
 
 
-## Shows `p` in preview mode; with `keep_view` the zoom and position stay as they are.
-func show_pattern(p: Pattern, palette: FlossPalette, keep_view := false) -> void:
+## Shows `p` in preview mode, or with `states` the stitched cells without a current step; with
+## `keep_view` the zoom and position stay as they are.
+func show_pattern(p: Pattern, palette: FlossPalette, keep_view := false, states := PackedByteArray()) -> void:
 	pattern = p
 	_colors.clear()
 	for code in p.thread_codes:
 		_colors.append(palette.find_code(code).color)
-	_states = PackedByteArray()
+	_states = states
 	_highlight = null
 	_hint = null
 	_scene.set_pattern(p, _colors, style.slash_first)
@@ -854,6 +857,22 @@ func _label_size() -> int:
 	return clampi(int(_cell_px * 0.5), 10, 18)
 
 
+## The grid cell at `point` in the view (mirrored on the back), or (-1, -1) outside the pattern.
+func cell_at(point: Vector2) -> Vector2i:
+	if pattern == null:
+		return Vector2i(-1, -1)
+	var grid := (point - _origin) / _cell_px
+	var cell := Vector2i(floori(pattern.width - grid.x if back_side else grid.x), floori(grid.y))
+	if cell.x < 0 or cell.y < 0 or cell.x >= pattern.width or cell.y >= pattern.height:
+		return Vector2i(-1, -1)
+	return cell
+
+
+## The cell the last `tapped` was on, as cell_at() found it when the finger came up.
+func tapped_cell() -> Vector2i:
+	return _tap_cell
+
+
 func _cell_rect(x: int, y: int) -> Rect2:
 	return Rect2(_origin + Vector2(_column_x(x + 1) if back_side else x, y) * _cell_px, Vector2.ONE * _cell_px)
 
@@ -1022,6 +1041,7 @@ func _on_tap(position: Vector2) -> void:
 		tapped.emit()
 	_tap_pending = true
 	_tap_position = position
+	_tap_cell = cell_at(position)
 	_tap_count += 1
 	var count := _tap_count
 	get_tree().create_timer(DOUBLE_TAP_SECONDS).timeout.connect(func() -> void:

@@ -22,7 +22,9 @@ extends Control
 ## button's tooltip, `--safe-area=<left>,<top>,<right>,<bottom>` pretends the screen has a notch
 ## or island (canvas pixels), `--picker=<code>` opens the colour picker for that colour of the
 ## list, `--picker-view=<list,project>` shows it as a list and/or only the project's colours,
-## and `--pick=<code>` chooses a colour in it.
+## and `--pick=<code>` chooses a colour in it. `--overview=<motif|progress>` sets what the overview
+## shows, `--ask-cell=<x>,<y>` taps that cell there (the question which colour to stitch), and
+## `--confirm` presses its OK.
 ##
 ## Two layouts (Preferences.touch_mode()): desktop has a toolbar on top and a side panel; touch
 ## shows the pattern on the whole screen with three round buttons: the menu (the toolbar,
@@ -246,6 +248,14 @@ var _eating_pointer := false
 ## Zoom and position of the overview when stitching began, so going back shows it as it was
 ## (and as the picture the page slides used).
 var _overview_view := []
+## Whether the overview shows the current progress instead of the whole motif; each project opens
+## with the motif. The switch for it (top right), where it was last put, and the question a tap on
+## a colour's area asks.
+var _overview_progress := false
+var _overview_switch: OverviewSwitch
+var _overview_switch_placed := false
+var _overview_switch_tween: Tween
+var _color_question: ColorQuestion
 
 
 func _ready() -> void:
@@ -304,7 +314,7 @@ func _build_ui() -> void:
 	_view = PatternView.new()
 	_view.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_view.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	_view.tapped.connect(_on_view_gesture.bind(_next_step))
+	_view.tapped.connect(_on_view_gesture.bind(_on_view_tapped))
 	_view.double_tapped.connect(_on_view_gesture.bind(_previous_step))
 	_view.two_finger_double_tapped.connect(_on_view_gesture.bind(_toggle_new_thread))
 	_view.swiped_from_right.connect(_on_view_gesture.bind(_swipe_side))
@@ -368,7 +378,16 @@ func _build_ui() -> void:
 	_symbols.speed = Preferences.step_symbols_speed()
 	_symbols.visible = false
 	add_child(_symbols)
+	_overview_switch = OverviewSwitch.new()
+	_overview_switch.visible = false
+	_overview_switch.visibility_changed.connect(func() -> void: _update_cover.call_deferred())
+	_overview_switch.progress_changed.connect(_set_overview_progress)
+	add_child(_overview_switch)
 	_build_settings_dialog()
+	_color_question = ColorQuestion.new()
+	_color_question.confirmed.connect(_on_color_confirmed)
+	_color_question.closed.connect(_restore_overlays)
+	add_child(_color_question)
 	_project_browser = ProjectBrowser.new()
 	_project_browser.open_requested.connect(_open_project)
 	_project_browser.project_renamed.connect(_on_project_renamed)
@@ -630,6 +649,7 @@ func _update_visibility() -> void:
 	_info_label.visible = not stitching
 	_stitch_panel.info.visible = stitching
 	_stitch_panel.controls.visible = stitching
+	_update_overview_switch()
 	if stitching:
 		_list_button.icon = ButtonIcons.Icon.NEEDLE
 		_list_button.tooltip = "Sticken: zurück, gestickt, neuer Faden"
@@ -1138,8 +1158,9 @@ func _update_cover() -> void:
 	var bottom := size.y - _bottom_row
 	if _list_panel.visible or _text_panel.visible:
 		bottom = size.y - _dock.get_rect().position.y
-	_view.set_covered(top + _symbols_room(), bottom)
+	_view.set_covered(top + _symbols_room() + _overview_switch_room(top), bottom)
 	_place_symbols(top)
+	_place_overview_switch(top)
 	if _stitch_thread >= 0 and _shown_step != null:
 		_view.ensure_visible(_shown_step, _shown_hint, _shown_thread_end, true)
 
@@ -1161,14 +1182,14 @@ func _update_symbols() -> void:
 func _symbols_room() -> float:
 	if not _symbols.visible:
 		return 0.0
-	return StepSymbols.SIDE + TOUCH_MARGIN + _symbols_drop(_symbols_top)
+	return StepSymbols.SIDE + TOUCH_MARGIN + _drop_past_buttons(_symbols.size.x, _symbols_top)
 
 
-## How far the symbol window goes down from `top` to pass under the round buttons on the left
-## (menu button, developer button) when it is too wide to sit beside them.
-func _symbols_drop(top: float) -> float:
+## How far something `width` wide at the top of the pattern goes down from `top` to pass under the
+## round buttons on the left (menu button, developer button) when it is too wide to sit beside them.
+func _drop_past_buttons(width: float, top: float) -> float:
 	var buttons := _left_buttons()
-	if buttons.is_empty() or _symbols.size.x <= size.x - _safe.z - TOUCH_MARGIN - _symbols_left_limit():
+	if buttons.is_empty() or width <= size.x - _safe.z - TOUCH_MARGIN - _symbols_left_limit():
 		return 0.0
 	return maxf(buttons.back().get_rect().end.y - top, 0.0)
 
@@ -1197,7 +1218,7 @@ func _place_symbols(top: float) -> void:
 	if not _symbols.visible:
 		return
 	var view := _view.get_global_rect()
-	var drop := _symbols_drop(top)
+	var drop := _drop_past_buttons(_symbols.size.x, top)
 	var x := view.get_center().x - _symbols.size.x / 2.0
 	if drop == 0.0:
 		x = maxf(x, _symbols_left_limit())
@@ -1210,6 +1231,41 @@ func _place_symbols(top: float) -> void:
 	elif _symbols.position != target:
 		_symbols_tween = create_tween()
 		_symbols_tween.tween_property(_symbols, "position", target, DOCK_OPEN_SECONDS).set_trans(
+				Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+
+
+## Shows the overview's switch on the overview of an open project, but not over the finale.
+func _update_overview_switch() -> void:
+	_overview_switch.visible = _project != null and _stitch_thread < 0 and _finale == null
+
+
+## Height the overview's switch takes from the top of the pattern, with its gap.
+func _overview_switch_room(top: float) -> float:
+	if not _overview_switch.visible:
+		return 0.0
+	_overview_switch.reset_size()
+	return (_overview_switch.size.y + TOUCH_MARGIN
+			+ _drop_past_buttons(_overview_switch.size.x, top))
+
+
+## Puts the overview's switch at the top right, `top` below the pattern's upper edge (the safe area
+## or the open menu); it glides there when it moves.
+func _place_overview_switch(top: float) -> void:
+	if not _overview_switch.visible:
+		_overview_switch_placed = false
+		return
+	_overview_switch.reset_size()
+	var width := _overview_switch.size.x
+	var target := Vector2(size.x - _safe.z - TOUCH_MARGIN - width,
+			top + _drop_past_buttons(width, top) + TOUCH_MARGIN).round()
+	if _overview_switch_tween != null:
+		_overview_switch_tween.kill()
+	if not _overview_switch_placed:
+		_overview_switch.position = target
+		_overview_switch_placed = true
+	elif _overview_switch.position != target:
+		_overview_switch_tween = create_tween()
+		_overview_switch_tween.tween_property(_overview_switch, "position", target, DOCK_OPEN_SECONDS).set_trans(
 				Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
 
 
@@ -1283,8 +1339,8 @@ func _input(event: InputEvent) -> void:
 
 ## Keys that no window or text field took: + and − zoom, WASD and the arrows move the view while
 ## held; while stitching Space is the next step, Backspace or Delete the one before, Enter a new
-## thread, Tab the other side and Q the overview. Combinations with Ctrl, Cmd or Alt stay the
-## system's and the browser's.
+## thread, Tab the other side and Q the overview; in the overview Tab switches between the motif
+## and the progress. Combinations with Ctrl, Cmd or Alt stay the system's and the browser's.
 func _unhandled_key_input(event: InputEvent) -> void:
 	var key := event as InputEventKey
 	if (not key.pressed or _project == null or _finale != null or _celebration != null
@@ -1298,8 +1354,12 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		_view.zoom_by(KEY_ZOOM)
 	elif code in [KEY_MINUS, KEY_KP_SUBTRACT]:
 		_view.zoom_by(1.0 / KEY_ZOOM)
-	elif _stitch_thread < 0 or key.echo:
+	elif key.echo:
 		return
+	elif _stitch_thread < 0:
+		if code != KEY_TAB:
+			return
+		_set_overview_progress(not _overview_progress)
 	elif code == KEY_SPACE:
 		_next_step()
 	elif code in [KEY_BACKSPACE, KEY_DELETE]:
@@ -1568,6 +1628,8 @@ func _set_project(project: StitchProject) -> void:
 	_leave_stitching()
 	_close_menu_unless_pinned()
 	_project = project
+	_overview_progress = false
+	_overview_switch.progress = false
 	if not _storage_requested:
 		_storage_requested = true
 		BrowserStorage.request()
@@ -1586,9 +1648,10 @@ func _show_pattern(keep_view: bool) -> void:
 
 ## Like _show_pattern(), for a whole new pattern: big ones go in parts while the hint shows.
 func _show_pattern_in_parts(keep_view: bool) -> void:
-	_view.prepare(_project.pattern, _palette)
+	var states := _overview_states()
+	_view.prepare(_project.pattern, _palette, states)
 	await _work_off(_view.run_prepare)
-	_view.show_pattern(_project.pattern, _palette, keep_view)
+	_view.show_pattern(_project.pattern, _palette, keep_view, states)
 	_show_info()
 	await _fill_color_list_in_parts()
 	_update_progress()
@@ -1721,10 +1784,7 @@ func _make_color_row(floss: FlossColor, count: int) -> Control:
 	fabric_box.toggled.connect(_on_fabric_toggled.bind(floss.code))
 	row.add_child(fabric_box)
 	var stitch_button := Button.new()
-	# Drawn at three times the size it shows, scaled down smoothly, so it stays sharp on dense screens.
-	stitch_button.icon = ButtonIcons.needle_icon(NEEDLE_ICON_PX * 3)
-	stitch_button.add_theme_constant_override("icon_max_width", NEEDLE_ICON_PX)
-	stitch_button.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
+	OverlayWindow.set_needle_icon(stitch_button, NEEDLE_ICON_PX)
 	stitch_button.tooltip_text = "Diese Farbe sticken"
 	stitch_button.custom_minimum_size = Vector2(NEEDLE_ICON_PX + 20, 40)
 	stitch_button.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -1916,7 +1976,7 @@ func _slide_to_overview() -> void:
 func _return_to_overview() -> void:
 	if _project.pattern.total_stitches() >= BIG_PATTERN_STITCHES and not _loading.active:
 		_loading.begin("Muster wird vorbereitet …")
-		_view.prepare(_project.pattern, _palette)
+		_view.prepare(_project.pattern, _palette, _overview_states())
 		await _work_off(_view.run_prepare)
 		_loading.finish()
 	_leave_stitching()
@@ -1938,7 +1998,7 @@ func _leave_stitching() -> void:
 	_shown_step = null
 	_update_visibility()
 	_set_back_side(false)
-	_view.show_preview()
+	_show_overview_states()
 	_view.back_page = null
 	if not _overview_view.is_empty():
 		_view.set_view_state(_overview_view)
@@ -1950,6 +2010,56 @@ func _leave_stitching() -> void:
 	_progress.set_color(ProgressStrip.DEFAULT_COLOR)
 	_progress.set_value(_overall_before)
 	_show_overall_progress.call_deferred()
+
+
+## What the overview shows as cell states: the current ones, or none for the finished motif.
+func _overview_states() -> PackedByteArray:
+	return _project.session.cell_states() if _overview_progress else PackedByteArray()
+
+
+func _show_overview_states() -> void:
+	if _overview_progress:
+		_view.show_progress(_project.session.cell_states(), null)
+	else:
+		_view.show_preview()
+
+
+## Switches the overview between the current progress and the whole motif, with the loading hint
+## on a big pattern.
+func _set_overview_progress(on: bool) -> void:
+	if _project == null or _stitch_thread >= 0 or _loading.active:
+		_overview_switch.progress = _overview_progress
+		return
+	_overview_progress = on
+	_overview_switch.progress = on
+	if _project.pattern.total_stitches() >= BIG_PATTERN_STITCHES:
+		_loading.begin("Muster wird vorbereitet …")
+		_view.prepare(_project.pattern, _palette, _overview_states())
+		await _work_off(_view.run_prepare)
+		_loading.finish()
+	_show_overview_states()
+
+
+## A tap on the area of a colour in the overview asks whether to stitch that colour; bare fabric
+## and left-out colours have none.
+func _ask_stitching(cell: Vector2i) -> void:
+	if _project == null or _stitch_thread >= 0 or _loading.active or _finale != null or cell.x < 0:
+		return
+	var thread := _project.pattern.get_cell(cell.x, cell.y)
+	if thread == Pattern.EMPTY:
+		return
+	_color_question.ask(_palette.find_code(_project.pattern.thread_codes[thread]), thread,
+			_project.session.finished_crosses(thread), _project.pattern.stitch_count(thread))
+	_open_window(_color_question)
+
+
+## OK in the question: stitching opens its own panels, so of those the window closed only a pinned
+## menu comes back.
+func _on_color_confirmed(thread: int) -> void:
+	for entry: Array in _hidden_overlays.duplicate():
+		if entry[0] != _menu_panel:
+			_hidden_overlays.erase(entry)
+	_start_stitching(thread)
 
 
 ## Fills the overview's bar up to the project's progress, then strikes through the colour just
@@ -1983,6 +2093,7 @@ func _show_finale() -> void:
 	_view.fit_to_view()
 	_finale = Finale.new()
 	add_child(_finale)
+	_update_overview_switch()
 	_finale.chosen.connect(_on_finale_chosen)
 	_loop_light(true)
 	_finale.play(_project.name, _project.pattern.total_stitches(), _project.pattern.thread_codes.size(),
@@ -1992,6 +2103,7 @@ func _show_finale() -> void:
 ## After the finale: back to the overview, or on to a new image or another project.
 func _on_finale_chosen(choice: Finale.Choice) -> void:
 	_finale = null
+	_update_overview_switch()
 	_loop_light(false)
 	if not _touch:
 		_open_all_panels()
@@ -2028,6 +2140,7 @@ func _press_key(entry: String) -> void:
 ## bar's fill show.
 func _update_progress(animate := false) -> void:
 	_progress.visible = _project != null
+	_update_overview_switch()
 	if _project == null:
 		return
 	var color := ProgressStrip.DEFAULT_COLOR
@@ -2168,8 +2281,12 @@ func _toggle_new_thread() -> void:
 		_save()
 
 
+## A tap on the view: the next step while stitching, the question which colour in the overview.
 func _on_view_tapped() -> void:
-	_next_step()
+	if _stitch_thread >= 0:
+		_next_step()
+	else:
+		_ask_stitching(_view.tapped_cell())
 
 
 func _handle_cmdline() -> void:
@@ -2192,6 +2309,9 @@ func _handle_cmdline() -> void:
 	var scroll := 0
 	var symbols_card := PackedStringArray()
 	var keys := PackedStringArray()
+	var overview := ""
+	var ask_cell := PackedStringArray()
+	var confirm := false
 	for arg in OS.get_cmdline_user_args():
 		if arg.begins_with("--open="):
 			await _open_image(arg.trim_prefix("--open="))
@@ -2248,6 +2368,12 @@ func _handle_cmdline() -> void:
 				_symbols.still = symbols[0] == "still"
 			else:
 				symbols_card = symbols
+		elif arg.begins_with("--overview="):
+			overview = arg.trim_prefix("--overview=")
+		elif arg.begins_with("--ask-cell="):
+			ask_cell = arg.trim_prefix("--ask-cell=").split(",")
+		elif arg == "--confirm":
+			confirm = true
 		elif arg == "--back":
 			back = true
 		elif arg == "--finish":
@@ -2369,6 +2495,13 @@ func _handle_cmdline() -> void:
 			_picker.choose(pick_code)
 			while _picker.is_animating():
 				await get_tree().process_frame
+	if not overview.is_empty():
+		await _set_overview_progress(overview == "progress")
+	if ask_cell.size() == 2:
+		await get_tree().process_frame
+		_ask_stitching(Vector2i(ask_cell[0].to_int(), ask_cell[1].to_int()))
+		if confirm:
+			_color_question.ok_button.pressed.emit()
 	if finale and _project != null:
 		await get_tree().process_frame
 		_show_finale()
@@ -2377,7 +2510,8 @@ func _handle_cmdline() -> void:
 	while (not _overlay_moving.is_empty() or _view.is_panning() or _view.is_page_sliding()
 			or _settings_dialog.is_animating()
 			or _project_browser.is_animating()
-			or _legal_window.is_animating()):
+			or _legal_window.is_animating()
+			or _color_question.is_animating()):
 		await get_tree().process_frame
 	if _view.is_flipping() and flip < 0.0:
 		await _view.flip_finished

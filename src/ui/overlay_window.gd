@@ -108,6 +108,14 @@ static func set_icon(button: Button, icon: int) -> void:
 	button.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
 
 
+## Puts the needle, `length` pixels long, in front of the button's text. Drawn at three times the
+## size it shows and scaled down smoothly, so it stays sharp on dense screens.
+static func set_needle_icon(button: Button, length: int) -> void:
+	button.icon = ButtonIcons.needle_icon(length * 3)
+	button.add_theme_constant_override("icon_max_width", length)
+	button.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
+
+
 ## Gives `button` the blue background of a main action, lighter under the mouse, darker while
 ## pressed, faded while disabled; the theme's shape and margins stay.
 static func make_primary(button: Button) -> Button:
