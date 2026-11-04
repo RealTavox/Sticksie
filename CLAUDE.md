@@ -173,6 +173,14 @@ item is resolved during normal work, delete its entry in the same change.
   hold import settings: `data/threads/dmc-floss.csv` uses the "keep" importer so it isn't
   turned into a translation, `samples/*.png` use the "image" importer so `load()` returns an
   exact `Image`).
+- Logo: `tools/make_logo.gd` writes every logo file from one description of the mark (the S of 5 × 7
+  cross stitches, the last one a half stitch in the block orange; blue `#2B78E0`, cream `#F5F1E6`):
+  `assets/icon.png` (`config/icon`), `assets/splash.png` (boot splash, also the web loading screen,
+  on a slightly darker blue so the white legal links there stay readable), and in `assets/logo/`
+  (`.gdignore`, so not exported) the SVGs (`logo`, `logo-square`, `logo-small` for 16 to 48 px with
+  filled cells instead of crosses, `android-foreground`, `android-monochrome`, `wordmark`,
+  `wordmark-light`) and `favicon-32.png`. Change the script and run it
+  (`$G --headless --path . --script res://tools/make_logo.gd`), don't edit the files by hand.
 - Data: `data/threads/dmc-floss.csv` (DMC palette, CC BY 4.0, source and credit in
   `data/threads/SOURCE.md`; the credit must stay visible in the app). `samples/` holds test
   images.
@@ -221,7 +229,7 @@ by these; check them on a
 device or in the editor and say so in the report. The browser side (`FileExchange` in the
 browser, `BrowserStorage`) only runs in a web export: `$G --headless --path . --export-release
 "Web" build/web/index.html` (preset "Web" in `export_presets.cfg`, nothreads, so no
-COOP/COEP headers; `build/` is ignored), `cp web/*.html build/web/`, serve `build/web` on `localhost` (a
+COOP/COEP headers; `build/` is ignored), `cp web/*.html assets/logo/favicon-32.png build/web/`, serve `build/web` on `localhost` (a
 secure context; a phone needs HTTPS) and check it in the browser, e.g. by giving the hidden file
 input a `DataTransfer` file and catching the download link's `click()`. Resuming: run once with `--open` and
 `--steps`, then again with only `--projects-dir` (the last project opens by itself).
