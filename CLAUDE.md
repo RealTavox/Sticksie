@@ -244,7 +244,8 @@ CI: `.github/workflows/web.yml` runs steps 1 and 2 and the web export on Linux w
 Godot `GODOT_VERSION` (keep it in step with the local binary; Godot and the web template are
 cached), on pushes to `main`, pull requests and version tags; only a pushed tag `v[0-9]*` is
 published on GitHub Pages (repo setting Pages → Source "GitHub Actions"; the `github-pages`
-environment must allow the tag pattern `v*`).
+environment must allow the tag pattern `v*`). The version is `config/version` in `project.godot`;
+a release tag is `v` plus that number.
 
 ### Save format
 

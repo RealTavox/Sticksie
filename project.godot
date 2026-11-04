@@ -11,6 +11,7 @@ config_version=5
 [application]
 
 config/name="Sticksie"
+config/version="0.2.0"
 run/main_scene="res://src/main.tscn"
 config/features=PackedStringArray("4.7", "GL Compatibility")
 run/low_processor_mode=true
