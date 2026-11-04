@@ -715,9 +715,9 @@ func _test_project_export_import() -> void:
 	ProjectStore.directory = "user://test_export"
 	_clear_directory(ProjectStore.directory)
 
-	_check(ProjectStore.export_name("Hypsi Anhänger") == "hypsi_anhaenger.kreuzstich.json",
+	_check(ProjectStore.export_name("Hypsi Anhänger") == "hypsi_anhaenger.sticksie.json",
 			"export file name from the project name: %s" % ProjectStore.export_name("Hypsi Anhänger"))
-	_check(ProjectStore.export_name("…") == "projekt.kreuzstich.json", "export name without letters")
+	_check(ProjectStore.export_name("…") == "projekt.sticksie.json", "export name without letters")
 
 	var project := _sample_project()
 	project.session.advance(0)

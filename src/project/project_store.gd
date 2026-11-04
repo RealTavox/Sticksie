@@ -8,7 +8,7 @@ static var directory := "user://projects"
 
 ## Ends the name of an exported project file. Still a .json, which every device's file picker
 ## knows.
-const EXPORT_SUFFIX := ".kreuzstich.json"
+const EXPORT_SUFFIX := ".sticksie.json"
 
 
 ## Saves `project`, giving it a new file name on its first save.
@@ -78,7 +78,7 @@ static func rename(path: String, new_name: String) -> Error:
 	return _write_json(path, data)
 
 
-## The file name an exported project gets: "Hypsi Anhänger" becomes "hypsi_anhaenger.kreuzstich.json".
+## The file name an exported project gets: "Hypsi Anhänger" becomes "hypsi_anhaenger.sticksie.json".
 static func export_name(project_name: String) -> String:
 	return _slug(project_name) + EXPORT_SUFFIX
 

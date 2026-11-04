@@ -1,4 +1,4 @@
-# Kreuzstich
+# Sticksie
 
 Godot 4.7 app (GDScript, Compatibility renderer) that turns pixel art into a cross-stitch
 pattern and guides the user stitch by stitch with the Danish method. Phones and tablets first,
@@ -20,7 +20,7 @@ item is resolved during normal work, delete its entry in the same change.
 
 - Project code: `src/` (`project/` saving: `StitchProject` and its JSON format, `ProjectStore`
   files in `user://projects/` (list with preview picture, rename, delete) and the last opened project; export is the saved
-  JSON as it is under `export_name()` (`*.kreuzstich.json`), `read_export()` reads one back as a new, unsaved project;
+  JSON as it is under `export_name()` (`*.sticksie.json`), `read_export()` reads one back as a new, unsaved project;
   `BrowserStorage` in the browser, where `user://` is the browser's IndexedDB: `check()` at start
   (`navigator.storage.persisted()`), `request()` (`persist()`) once a project is open, `safety` SAFE /
   MAY_BE_CLEARED / NOT_KEPT (no IndexedDB, e.g. a private window) and `warning()`: NOT_KEPT shows in the
@@ -97,7 +97,7 @@ item is resolved during normal work, delete its entry in the same change.
   it closes), `FileExchange` gets files in and out: the app's native file dialogs, or in the browser
   (no native dialog there, and the app sees only its own storage) a hidden `<input type=file>`
   (`showPicker()`, else `click()`; browsers allow it only shortly after a tap) and a download,
-  through a small JavaScript helper (`BROWSER_HELPER`, `window.kreuzstichFiles`) called via
+  through a small JavaScript helper (`BROWSER_HELPER`, `window.sticksieFiles`) called via
   `JavaScriptBridge`; files dropped on the window open too (`main.gd` `_on_files_dropped()`: a
   `.json` is imported, anything else opened as an image), `ProjectBrowser` the
   project list: open, rename, export, delete after a confirmation, "Projekt importieren" at the

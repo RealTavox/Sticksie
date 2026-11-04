@@ -36,7 +36,7 @@ func _init() -> void:
 	_add_heading("Impressum")
 	_add_text("Angaben gemäß § 18 Abs. 1 MStV und § 5 DDG")
 	_add_text("%s\n%s\nE-Mail: %s" % [PROVIDER_NAME, PROVIDER_ADDRESS, CONTACT_EMAIL])
-	_add_text("Kreuzstich ist ein privates, nicht kommerzielles Projekt.")
+	_add_text("Sticksie ist ein privates, nicht kommerzielles Projekt.")
 	_add_links([["E-Mail schreiben", "mailto:" + CONTACT_EMAIL], ["GitHub Issues", CONTACT_URL]])
 	_add_heading("Datenschutz")
 	_add_text("Verantwortlich: %s, %s" % [PROVIDER_NAME, PROVIDER_ADDRESS.replace("\n", ", ")])

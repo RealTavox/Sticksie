@@ -15,12 +15,12 @@ enum Kind { IMAGE, PROJECT }
 ## Per kind: the filter of the app's dialog and the browser picker's accept list.
 const FILTERS := {
 	Kind.IMAGE: ["*.png ; PNG-Bilder", ".png,image/png"],
-	Kind.PROJECT: ["*.json ; Kreuzstich-Projekte", ".json,application/json"],
+	Kind.PROJECT: ["*.json ; Sticksie-Projekte", ".json,application/json"],
 }
 
 ## The browser side, set up once: a file picker and a download, called through JavaScriptBridge.
 const BROWSER_HELPER := """
-window.kreuzstichFiles = {
+window.sticksieFiles = {
 	// Opens the browser's file picker; calls `done` with the chosen file's name and contents (an
 	// ArrayBuffer). Browsers open it only shortly after a tap, which the app's button press is.
 	pick(accept, done) {
@@ -99,7 +99,7 @@ func _ready() -> void:
 func pick(kind: Kind, on_picked: Callable) -> void:
 	_on_picked = on_picked
 	if in_browser():
-		JavaScriptBridge.get_interface("kreuzstichFiles").pick(FILTERS[kind][1], _browser_picked)
+		JavaScriptBridge.get_interface("sticksieFiles").pick(FILTERS[kind][1], _browser_picked)
 		return
 	_open_dialog.filters = PackedStringArray([FILTERS[kind][0]])
 	_open_dialog.popup_centered_ratio(0.8)
@@ -109,7 +109,7 @@ func pick(kind: Kind, on_picked: Callable) -> void:
 ## user chooses.
 func save_text(file_name: String, text: String) -> void:
 	if in_browser():
-		JavaScriptBridge.get_interface("kreuzstichFiles").save(text, file_name, "application/json")
+		JavaScriptBridge.get_interface("sticksieFiles").save(text, file_name, "application/json")
 		return
 	_save_text = text
 	_save_dialog.filters = PackedStringArray([FILTERS[Kind.PROJECT][0]])
