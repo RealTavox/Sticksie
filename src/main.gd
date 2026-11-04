@@ -13,7 +13,7 @@ extends Control
 ## bottom-right), `--settings` opens the settings dialog (`--advanced`: with the advanced part open),
 ## `--method=<english|danish>` sets the stitch method, `--back-pass=<whole|blocks>` the Danish
 ## return pass, `--max-block=<n>` the most stitches per block, `--needle=<auto|bottom|top>` and
-## `--first-leg=<slash|backslash>` the stitch style (bottom/top/first-leg fix it), `--projects` the project list, `--stitch=<code>` starts stitching that thread, `--steps=<n>` confirms n steps, `--back` shows the back while stitching, `--screenshot=<png path>` saves a screenshot after a few
+## `--first-leg=<slash|backslash>` the stitch style (bottom/top/first-leg fix it), `--projects` the project list, `--legal` the Impressum & Datenschutz window (`--legal-notices`: with the licence texts open), `--stitch=<code>` starts stitching that thread, `--steps=<n>` confirms n steps, `--back` shows the back while stitching, `--screenshot=<png path>` saves a screenshot after a few
 ## frames and quits (`--wait=<seconds>` waits that much longer, e.g. into an animation).
 ## `--keys=<key>[:<seconds>],…` presses keys one after the other (held that long), after the steps.
 ## `--finish` stitches the rest of the `--stitch` colour (the celebration comes in),
@@ -131,6 +131,7 @@ var _open_button: Button
 var _projects_button: Button
 var _project_browser: ProjectBrowser
 var _settings_dialog: OverlayWindow
+var _legal_window: LegalWindow
 ## Touch overlays closed while the file dialog, the project list or the settings are open, as
 ## [panel, button] pairs; they open again when it closes.
 var _hidden_overlays: Array[Array] = []
@@ -286,6 +287,7 @@ func _build_ui() -> void:
 	_toolbar.add_child(_side_button)
 	# Last, so it comes after Rückseite while stitching.
 	_toolbar.add_child(_make_toolbar_button("Einstellungen", _show_settings, ButtonIcons.Icon.GEAR, false))
+	_toolbar.add_child(_make_toolbar_button("Impressum & Datenschutz", _show_legal, ButtonIcons.Icon.INFO, false))
 	_info_label = Label.new()
 	_info_label.text = "Öffne ein Pixelart-Bild (PNG). Ein Pixel wird ein Kreuzstich."
 	_info_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -366,6 +368,9 @@ func _build_ui() -> void:
 	_project_browser.import_requested.connect(_files.pick.bind(FileExchange.Kind.PROJECT, _import_project))
 	_project_browser.closed.connect(_restore_overlays)
 	add_child(_project_browser)
+	_legal_window = LegalWindow.new()
+	_legal_window.closed.connect(_restore_overlays)
+	add_child(_legal_window)
 
 
 ## The pattern on the whole screen, the progress bar and the overlay panels above it: the menu
@@ -1546,6 +1551,10 @@ func _show_info() -> void:
 	_info_label.text = text
 
 
+func _show_legal() -> void:
+	_open_window(_legal_window)
+
+
 func _show_projects() -> void:
 	_project_browser.current_path = _project.path if _project != null else ""
 	_open_window(_project_browser)
@@ -2132,6 +2141,11 @@ func _handle_cmdline() -> void:
 			_restore_light()
 		elif arg == "--projects":
 			_show_projects.call_deferred()
+		elif arg == "--legal":
+			_show_legal.call_deferred()
+		elif arg == "--legal-notices":
+			_legal_window.show_notices()
+			_show_legal.call_deferred()
 		elif arg.begins_with("--max-holes="):
 			Preferences.set_max_hole_count(arg.trim_prefix("--max-holes=").to_int())
 		elif arg.begins_with("--max-skip="):
@@ -2230,7 +2244,8 @@ func _handle_cmdline() -> void:
 		return
 	while (not _overlay_moving.is_empty() or _view.is_panning() or _view.is_page_sliding()
 			or _settings_dialog.is_animating()
-			or _project_browser.is_animating()):
+			or _project_browser.is_animating()
+			or _legal_window.is_animating()):
 		await get_tree().process_frame
 	if _view.is_flipping() and flip < 0.0:
 		await _view.flip_finished
@@ -2240,7 +2255,7 @@ func _handle_cmdline() -> void:
 		while _progress.is_filling():
 			await get_tree().process_frame
 	if scroll > 0:
-		for window: OverlayWindow in [_settings_dialog, _project_browser]:
+		for window: OverlayWindow in [_settings_dialog, _project_browser, _legal_window]:
 			if window.is_open():
 				window.scroll_to(scroll)
 	for i in 3:

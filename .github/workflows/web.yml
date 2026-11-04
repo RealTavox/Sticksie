@@ -67,6 +67,7 @@ jobs:
         run: |
           mkdir -p build/web
           "$G" --headless --path . --export-release "Web" build/web/index.html
+          cp web/*.html build/web/
           test -f build/web/index.pck
 
       - uses: actions/upload-pages-artifact@v3

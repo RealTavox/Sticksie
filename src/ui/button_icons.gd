@@ -5,7 +5,7 @@ class_name ButtonIcons
 ## units of the button's disc: (0, 0) is its centre, 1 its rim, y points down. Each mask is
 ## made once and cached.
 
-enum Icon { MENU, TEXT, NEEDLE, SPOOL, PIN, IMAGE, FOLDER, PROJECTS, GEAR, PENCIL, TRASH, CLOSE, CHECK, OVERVIEW, FLIP, BACK, NEW_THREAD, LIST, FILTER, WRENCH, EXPORT, IMPORT }
+enum Icon { MENU, TEXT, NEEDLE, SPOOL, PIN, IMAGE, FOLDER, PROJECTS, GEAR, PENCIL, TRASH, CLOSE, CHECK, OVERVIEW, FLIP, BACK, NEW_THREAD, LIST, FILTER, WRENCH, EXPORT, IMPORT, INFO }
 
 const SIZE := 128
 
@@ -251,6 +251,11 @@ static func distance(icon: Icon, p: Vector2) -> float:
 		Icon.IMPORT:
 			# An arrow down into a tray: a file comes into the app.
 			return minf(_tray(p), _arrow(p, Vector2(0.0, -0.38), Vector2(0.0, 0.16)))
+		Icon.INFO:
+			# An "i" in a ring.
+			var d := absf(p.length() - 0.42) - 0.05
+			d = minf(d, _capsule(p, Vector2(0.0, -0.03), Vector2(0.0, 0.2), 0.06))
+			return minf(d, p.distance_to(Vector2(0.0, -0.21)) - 0.07)
 	return INF
 
 

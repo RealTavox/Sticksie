@@ -163,6 +163,12 @@ item is resolved during normal work, delete its entry in the same change.
   `StitchProject.replace_color()` (colour list rows; "Auslassen" fades the whole row); a touch outside the picker cancels
   it, as a tap beside the project list closes it; "Ersetzen", "Übernehmen" and the stitch button
   are blue via `OverlayWindow.make_primary()`,
+  `LegalWindow` "Impressum & Datenschutz" in the menu: Impressum, privacy notice, GPL notice and
+  source link, the colour credit with the DMC trademark note, licence texts
+  (`Engine.get_license_text()` and friends plus the add-on's `LICENSE`, which every export preset
+  has to include) built when asked for; `web/impressum.html` and `web/datenschutz.html` say the
+  same as plain pages next to the web build (tested to agree), linked while the app loads or if it
+  fails (`html/head_include` of the Web preset; without JavaScript it redirects to the Impressum),
   `tests/run_tests.gd`, plus `project.godot` and the `*.import` files next to resources (they
   hold import settings: `data/threads/dmc-floss.csv` uses the "keep" importer so it isn't
   turned into a translation, `samples/*.png` use the "image" importer so `load()` returns an
@@ -171,7 +177,7 @@ item is resolved during normal work, delete its entry in the same change.
   `data/threads/SOURCE.md`; the credit must stay visible in the app). `samples/` holds test
   images.
 - License: GPLv3 (`LICENSE`, the unmodified text). Bundled parts keep their own: Godot (MIT;
-  its notice has to ship with every exported build, the app doesn't show it yet), the DMC data
+  its notice has to ship with every exported build, `LegalWindow` shows it), the DMC data
   (CC BY 4.0), `addons/godot_ai/` (MIT).
 - Generated / not project code: `.godot/`; `addons/godot_ai/` (third-party Godot AI MCP
   add-on, v4.3.1, MIT; update it only with the dock's Update button, never by extracting over
@@ -197,7 +203,7 @@ How to check a change; every fix and feature runs these. Godot binary:
    `$G --path . --resolution 720x1280 -- --projects-dir=<scratch dir> --open=res://samples/hypsi_anhaenger.png --screenshot=<abs path>.png`,
    and again with `1280x720` for landscape; look at the PNGs. Add `--stitch=<DMC code>
    --steps=<n>` for the stitching screen after n confirmed steps, `--max-skip=<n>` to set the
-   skip limit (-1: none), `--max-holes=<n>` how far counting starts at the last hole (saved), `--start=<auto|top-left|top-right|bottom-left|bottom-right>` the start corner, `--settings` to open the settings dialog, `--projects` the project list, `--back` the back side while stitching,
+   skip limit (-1: none), `--max-holes=<n>` how far counting starts at the last hole (saved), `--start=<auto|top-left|top-right|bottom-left|bottom-right>` the start corner, `--settings` to open the settings dialog, `--projects` the project list, `--legal` the Impressum & Datenschutz window (`--legal-notices`: with the licence texts open), `--back` the back side while stitching,
    `--method=<danish|english>`, `--back-pass=<whole|blocks>`, `--max-block=<n>`, `--needle=<auto|bottom|top>`, `--first-leg=<slash|backslash>`
    (both fix the style), `--dev-tools` with `--settings` for the developer tools, `--scroll=<px>` scrolls the open window (settings, project list) that far down before the screenshot, `--dev=<on|off>` the developer mode (saved), `--symbols=<on|off|still|animated>` the symbol window or its still pictures (saved) or
    `--symbols=<secure|thread|anchor|count|stitch>[,<0..1>]` to hold that card at that point of its animation, `--ui=<touch|desktop>` the layout, `--keys=<key>[:<seconds>],…` presses keys after the steps (OS key names, e.g. Tab, Space, BackSpace, Plus, D:0.4 held), `--ui-scale=<factor>` the UI-Skalierung (saved), `--import=<path>` imports an exported project, `--export=<path>` writes the open project's export there, `--storage=<safe|may-clear|not-kept>` fakes the browser storage's safety for the warnings,
@@ -215,7 +221,7 @@ by these; check them on a
 device or in the editor and say so in the report. The browser side (`FileExchange` in the
 browser, `BrowserStorage`) only runs in a web export: `$G --headless --path . --export-release
 "Web" build/web/index.html` (preset "Web" in `export_presets.cfg`, nothreads, so no
-COOP/COEP headers; `build/` is ignored), serve `build/web` on `localhost` (a
+COOP/COEP headers; `build/` is ignored), `cp web/*.html build/web/`, serve `build/web` on `localhost` (a
 secure context; a phone needs HTTPS) and check it in the browser, e.g. by giving the hidden file
 input a `DataTransfer` file and catching the download link's `click()`. Resuming: run once with `--open` and
 `--steps`, then again with only `--projects-dir` (the last project opens by itself).

@@ -43,6 +43,7 @@ func _initialize() -> void:
 	_test_leg_progress()
 	_test_light_orbit()
 	_test_view_keeps_step_inside()
+	_test_legal_notices()
 	# The root joins the tree only once the main loop runs; gestures need it for their timers.
 	await process_frame
 	_test_gestures()
@@ -1224,6 +1225,36 @@ func _test_page_swipe() -> void:
 
 ## The first step of a colour is shown with the corner it is counted from, as long as that leaves
 ## the step well inside the view; a corner far away runs off screen and the step is centred.
+## The window shows the Impressum and what the licences ask for, and agrees with the web pages.
+func _test_legal_notices() -> void:
+	var window := LegalWindow.new()
+	var shown := PackedStringArray()
+	for child: Node in window.content.get_children():
+		if child is Label:
+			shown.append(child.text)
+		elif child is HFlowContainer:
+			for button: Node in child.get_children():
+				shown.append(button.text)
+	var text := "\n".join(shown)
+	for needed: String in [LegalWindow.COPYRIGHT, "General Public License", "Gewährleistung", "Quellcode",
+			"CC BY 4.0", "MakeBead", "keiner Verbindung zu DMC", "Impressum", "Datenschutz"]:
+		_check(text.contains(needed), "the legal window names %s" % needed)
+	var imprint := FileAccess.get_file_as_string("res://web/impressum.html")
+	var privacy := FileAccess.get_file_as_string("res://web/datenschutz.html")
+	for page: String in [text, imprint, privacy]:
+		_check(page.contains(LegalWindow.PROVIDER_NAME), "the provider's name is on every legal page")
+		_check(page.contains(LegalWindow.CONTACT_EMAIL), "the contact address is on every legal page")
+		for line: String in LegalWindow.PROVIDER_ADDRESS.split("\n"):
+			_check(page.contains(line), "the provider's address is on every legal page")
+	for paragraph: String in [LegalWindow.PRIVACY_APP_TEXT, LegalWindow.PRIVACY_WEB_TEXT,
+			LegalWindow.PRIVACY_CONTACT_TEXT, LegalWindow.PRIVACY_RIGHTS_TEXT]:
+		_check(privacy.contains(paragraph) and text.contains(paragraph), "the app and the page say the same on privacy")
+	var notices := LegalWindow.notices_text()
+	for needed: String in ["Godot Engine contributors", "FreeType", "Godot AI contributors"]:
+		_check(notices.contains(needed), "the licence texts hold %s" % needed)
+	window.free()
+
+
 func _test_view_keeps_step_inside() -> void:
 	var view := PatternView.new()
 	view.size = Vector2(720, 1280)
