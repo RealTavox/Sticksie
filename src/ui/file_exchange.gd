@@ -14,7 +14,8 @@ enum Kind { IMAGE, PROJECT }
 
 ## Per kind: the filter of the app's dialog and the browser picker's accept list.
 const FILTERS := {
-	Kind.IMAGE: ["*.png ; PNG-Bilder", ".png,image/png"],
+	Kind.IMAGE: ["*.png, *.jpg, *.jpeg, *.webp, *.gif, *.bmp, *.tga, *.svg ; Bilder",
+			".png,.jpg,.jpeg,.webp,.gif,.bmp,.tga,.svg,image/png,image/jpeg,image/webp,image/gif,image/bmp,image/svg+xml"],
 	Kind.PROJECT: ["*.json ; Sticksie-Projekte", ".json,application/json"],
 }
 

@@ -60,6 +60,17 @@ var _shown := PackedByteArray()
 var _light_direction := Vector3(0.0, 0.0, 1.0)
 var _side_normal := Vector3(0.0, 0.0, 1.0)
 
+## The front being worked out by prepare_front() and run_prepare().
+var _prepared_pattern: Pattern
+var _prepared_colors: Array[Color] = []
+var _prepared_slash_first := true
+var _prepared_states := PackedByteArray()
+var _prepared_buffer := PackedFloat32Array()
+var _prepared_cells := PackedInt32Array()
+var _prepared_shown := PackedByteArray()
+var _prepared_row := 0
+var _prepared_next := 0
+
 
 func _init() -> void:
 	var environment := Environment.new()
@@ -117,10 +128,13 @@ func set_pattern(pattern: Pattern, colors: Array[Color], slash_first: bool) -> v
 	_slash_first = slash_first
 	# Instance colours are sRGB: the Compatibility renderer converts them itself.
 	_colors = colors.duplicate()
-	_cells.clear()
-	for index in pattern.width * pattern.height:
-		if pattern.get_cell(index % pattern.width, index / pattern.width) != Pattern.EMPTY:
-			_cells.append(index)
+	if _is_prepared_for(pattern):
+		_cells = _prepared_cells
+	else:
+		_cells.clear()
+		for index in pattern.width * pattern.height:
+			if pattern.get_cell(index % pattern.width, index / pattern.width) != Pattern.EMPTY:
+				_cells.append(index)
 	_shown = PackedByteArray()
 	_shown.resize(_cells.size())
 	_shown.fill(255)
@@ -144,9 +158,13 @@ func set_pattern(pattern: Pattern, colors: Array[Color], slash_first: bool) -> v
 func set_states(states: PackedByteArray) -> void:
 	if _pattern == null:
 		return
+	if _take_prepared(states):
+		return
 	var count := _cells.size()
 	if _front.instance_count != count * 2:
-		_build_front(states)
+		prepare_front(_pattern, _colors, _slash_first, states)
+		run_prepare(PatternImporter.Job.NO_LIMIT)
+		_take_prepared(states)
 		return
 	for k in count:
 		var state := StitchSession.Cell.FULL if states.is_empty() else states[_cells[k]]
@@ -257,28 +275,79 @@ func _materials() -> Array[ShaderMaterial]:
 
 
 ## Every leg of the pattern in one go: all first legs, then all second legs.
-func _build_front(states: PackedByteArray) -> void:
-	var count := _cells.size()
-	var buffer := PackedFloat32Array()
-	buffer.resize(count * 2 * STRIDE)
-	for k in count:
-		var x := _cells[k] % _pattern.width
-		var y := _cells[k] / _pattern.width
-		var state := StitchSession.Cell.FULL if states.is_empty() else states[_cells[k]]
-		_shown[k] = state
-		var color := _colors[_pattern.get_cell(x, y)]
-		var seed := _seed(x, y)
-		_write(buffer, k, _leg_ends(x, y, true), FIRST_LIFT, 1.0, color, seed,
-				state == StitchSession.Cell.FULL, state != StitchSession.Cell.NONE)
-		_write(buffer, k + count, _leg_ends(x, y, false), SECOND_LIFT, 1.0, color, seed + 0.5,
-				false, state == StitchSession.Cell.FULL)
-	_set_buffer(_front, buffer)
+## Starts working out the front of `pattern` with `states` for the set_pattern() and set_states()
+## that follow, in parts (run_prepare()), so the app keeps drawing during a big one.
+func prepare_front(pattern: Pattern, colors: Array[Color], slash_first: bool, states: PackedByteArray) -> void:
+	_prepared_pattern = pattern
+	_prepared_colors = colors
+	_prepared_slash_first = slash_first
+	_prepared_states = states
+	var count := pattern.total_stitches()
+	_prepared_buffer = PackedFloat32Array()
+	_prepared_buffer.resize(count * 2 * STRIDE)
+	_prepared_cells = PackedInt32Array()
+	_prepared_cells.resize(count)
+	_prepared_shown = PackedByteArray()
+	_prepared_shown.resize(count)
+	_prepared_row = 0
+	_prepared_next = 0
+
+
+## Works on the prepared front until the time `until_usec` (Time.get_ticks_usec()) has passed.
+## Returns whether it is done.
+func run_prepare(until_usec: int) -> bool:
+	var pattern := _prepared_pattern
+	var count := _prepared_cells.size()
+	var cells := pattern.cells
+	while _prepared_row < pattern.height:
+		var y := _prepared_row
+		var index := y * pattern.width
+		for x in pattern.width:
+			var thread := cells[index]
+			if thread != Pattern.EMPTY:
+				var k := _prepared_next
+				_prepared_next += 1
+				_prepared_cells[k] = index
+				var state := StitchSession.Cell.FULL if _prepared_states.is_empty() else _prepared_states[index]
+				_prepared_shown[k] = state
+				var color := _prepared_colors[thread]
+				var seed := _seed(x, y)
+				_write(_prepared_buffer, k, _leg_ends_of(x, y, _prepared_slash_first), FIRST_LIFT, 1.0, color, seed,
+						state == StitchSession.Cell.FULL, state != StitchSession.Cell.NONE)
+				_write(_prepared_buffer, k + count, _leg_ends_of(x, y, not _prepared_slash_first), SECOND_LIFT, 1.0,
+						color, seed + 0.5, false, state == StitchSession.Cell.FULL)
+			index += 1
+		_prepared_row += 1
+		if Time.get_ticks_usec() >= until_usec and _prepared_row < pattern.height:
+			return false
+	return true
+
+
+func _is_prepared_for(pattern: Pattern) -> bool:
+	return (_prepared_pattern == pattern and _prepared_slash_first == _slash_first
+			and _prepared_row == pattern.height)
+
+
+## Shows the prepared front if it is the one for these `states`.
+func _take_prepared(states: PackedByteArray) -> bool:
+	if not _is_prepared_for(_pattern) or _prepared_states != states:
+		return false
+	_cells = _prepared_cells
+	_shown = _prepared_shown
+	_set_buffer(_front, _prepared_buffer)
+	_prepared_pattern = null
+	_prepared_buffer = PackedFloat32Array()
+	return true
 
 
 ## The holes a leg of cell (x, y) goes between: "/" from the bottom left to the top right, "\"
 ## from the top left to the bottom right.
 func _leg_ends(x: int, y: int, first: bool) -> Array[Vector2]:
-	if first == _slash_first:
+	return _leg_ends_of(x, y, first == _slash_first)
+
+
+func _leg_ends_of(x: int, y: int, slash: bool) -> Array[Vector2]:
+	if slash:
 		return [Vector2(x, y + 1), Vector2(x + 1, y)]
 	return [Vector2(x, y), Vector2(x + 1, y + 1)]
 

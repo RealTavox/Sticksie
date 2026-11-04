@@ -36,8 +36,8 @@ item is resolved during normal work, delete its entry in the same change.
   switched in the settings, as still pictures (the last frames) or animated, and how
   fast; developer mode in section `dev`, only honoured in
   debug builds); `palette/` thread colours and Lab matching, `pattern/` the `Pattern`
-  resource, `import/` PNG → pattern, `planner/` Danish stitch order (`StitchPlanner` →
-  `StitchStep`s; `PathOptimizer` finds the order with the least thread on the back), `stitching/` progress per thread (`StitchSession`), the back of the fabric
+  resource, `import/` image file → pattern (`ImageReader`: PNG, JPEG, WebP, GIF, BMP, TGA, SVG, told apart by their first bytes, TGA by its name; `GifDecoder` the first frame, as Godot has no GIF loader; `PatternImporter`: over `MAX_EXACT_COLORS` colours, as in a photo, colours are matched at 4 bits per channel, or finding the threads takes minutes; images up to 1000 pixels per side, `main.gd` `MAX_SIDE`), `planner/` Danish stitch order (`StitchPlanner` →
+  `StitchStep`s; `PathOptimizer` finds the order with the least thread on the back), `stitching/` progress per thread (`StitchSession`; the cell states and counts per thread are kept up to date instead of worked out on every step, and asking for them plans nothing, so a big pattern plans a thread only when it is stitched), the back of the fabric
   (`BackSide`: the thread between the needle holes, worked out from the planned steps; drawn
   mirrored by `PatternView.back_side`), where the needle comes up (`StitchStyle`, see Planner
   rules) and position hints
@@ -163,6 +163,7 @@ item is resolved during normal work, delete its entry in the same change.
   `StitchProject.replace_color()` (colour list rows; "Auslassen" fades the whole row); a touch outside the picker cancels
   it, as a tap beside the project list closes it; "Ersetzen", "Übernehmen" and the stitch button
   are blue via `OverlayWindow.make_primary()`,
+  `LoadingHint` the loading hint over a dimmed screen that takes all input (shows only after `SHOW_AFTER_SECONDS`; a row of crosses stitched there and back, or still with `moving` false, as low processor mode draws only on change). Long work runs in parts with frames between them, as the web export has no threads: `main.gd` `_work_off()` drives `PatternImporter.Job`, `StitchScene.prepare_front()`/`run_prepare()` (used by the next `set_states()` with those states; `PatternView.prepare()`) and `_fill_color_list_in_parts()`; planning a big thread (`_plan_thread()`, not divisible) runs on a `Thread`, in the browser it blocks with the still hint,
   `LegalWindow` "Impressum & Datenschutz" in the menu: Impressum, privacy notice, GPL notice and
   source link, the colour credit with the DMC trademark note, licence texts
   (`Engine.get_license_text()` and friends plus the add-on's `LICENSE`, which every export preset
@@ -202,7 +203,7 @@ How to check a change; every fix and feature runs these. Godot binary:
    script and imports resources; run it first after adding a `class_name`).
 2. `$G --headless --path . --script res://tests/run_tests.gd`: prints "All tests passed."
    and exits 0. Plain checks without a framework (Lab/CIEDE2000 against Sharma's reference
-   pairs, DMC palette, importing the sample, stitch planner incl. that every cell of the sample
+   pairs, DMC palette, importing the sample, reading every image format incl. GIF, coarse matching of many colours, progress without planning, stitch planner incl. that every cell of the sample
    is crossed exactly once, stitching progress, position hints and their wording, view gestures fed as touch events, incl. the swipe back dragging the page, replaying a tapped symbol card, a stitch card per run of alike stitches, counting from the last hole within the limit and the warning beyond it, the view keeping the step inside when its corner is far away, exporting and importing a project).
 3. `$G --headless --path . --quit-after 120 -- --projects-dir=<scratch dir> --open=res://samples/hypsi_anhaenger.png --stitch=3837 --steps=7 2>&1 | grep -E "ERROR|WARNING"`:
    no output. Always pass `--projects-dir` with a scratch folder: every run that opens an image
@@ -211,7 +212,7 @@ How to check a change; every fix and feature runs these. Godot binary:
    `$G --path . --resolution 720x1280 -- --projects-dir=<scratch dir> --open=res://samples/hypsi_anhaenger.png --screenshot=<abs path>.png`,
    and again with `1280x720` for landscape; look at the PNGs. Add `--stitch=<DMC code>
    --steps=<n>` for the stitching screen after n confirmed steps, `--max-skip=<n>` to set the
-   skip limit (-1: none), `--max-holes=<n>` how far counting starts at the last hole (saved), `--start=<auto|top-left|top-right|bottom-left|bottom-right>` the start corner, `--settings` to open the settings dialog, `--projects` the project list, `--legal` the Impressum & Datenschutz window (`--legal-notices`: with the licence texts open), `--back` the back side while stitching,
+   skip limit (-1: none), `--max-holes=<n>` how far counting starts at the last hole (saved), `--start=<auto|top-left|top-right|bottom-left|bottom-right>` the start corner, `--settings` to open the settings dialog, `--projects` the project list, `--legal` the Impressum & Datenschutz window (`--legal-notices`: with the licence texts open), `--back` the back side while stitching, `--loading=<text>` or `--loading=still,<text>` holds the loading hint,
    `--method=<danish|english>`, `--back-pass=<whole|blocks>`, `--max-block=<n>`, `--needle=<auto|bottom|top>`, `--first-leg=<slash|backslash>`
    (both fix the style), `--dev-tools` with `--settings` for the developer tools, `--scroll=<px>` scrolls the open window (settings, project list) that far down before the screenshot, `--dev=<on|off>` the developer mode (saved), `--symbols=<on|off|still|animated>` the symbol window or its still pictures (saved) or
    `--symbols=<secure|thread|anchor|count|stitch>[,<0..1>]` to hold that card at that point of its animation, `--ui=<touch|desktop>` the layout, `--keys=<key>[:<seconds>],…` presses keys after the steps (OS key names, e.g. Tab, Space, BackSpace, Plus, D:0.4 held), `--ui-scale=<factor>` the UI-Skalierung (saved), `--import=<path>` imports an exported project, `--export=<path>` writes the open project's export there, `--storage=<safe|may-clear|not-kept>` fakes the browser storage's safety for the warnings,

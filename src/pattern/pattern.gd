@@ -27,9 +27,10 @@ func stitch_counts() -> PackedInt32Array:
 	return counts
 
 
+## Number of stitches of `thread`.
+func stitch_count(thread: int) -> int:
+	return cells.count(thread)
+
+
 func total_stitches() -> int:
-	var total := 0
-	for index in cells:
-		if index != EMPTY:
-			total += 1
-	return total
+	return cells.size() - cells.count(EMPTY)

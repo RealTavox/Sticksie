@@ -11,6 +11,10 @@ func _initialize() -> void:
 	_test_palette()
 	_test_import_sample()
 	_test_import_transparent()
+	_test_import_many_colors()
+	_test_import_in_parts()
+	_test_image_formats()
+	_test_gif()
 	_test_split_blocks()
 	_test_planner_rows()
 	_test_planner_order()
@@ -41,6 +45,7 @@ func _initialize() -> void:
 	_test_format_2_loads()
 	_test_picker_order()
 	_test_leg_progress()
+	_test_session_stays_unplanned()
 	_test_light_orbit()
 	_test_view_keeps_step_inside()
 	_test_legal_notices()
@@ -242,6 +247,110 @@ func _describe(steps: Array[StitchStep]) -> Array[String]:
 	for step in steps:
 		result.append(str(step))
 	return result
+
+
+func _test_import_many_colors() -> void:
+	var image := Image.create_empty(64, 64, false, Image.FORMAT_RGB8)
+	for y in 64:
+		for x in 64:
+			image.set_pixel(x, y, Color8(x * 4, y * 4, (x ^ y) * 4))
+	var palette := FlossPalette.dmc()
+	var pattern := PatternImporter.from_image(image, palette)
+	_check(pattern.total_stitches() == 64 * 64, "an image of many colours has a stitch per pixel")
+	_check(pattern.thread_codes.size() <= 4096, "and its colours are matched coarsely")
+	var dark := palette.find_code(pattern.thread_codes[pattern.get_cell(0, 0)])
+	_check(ColorLab.delta_e(ColorLab.from_color(dark.color), ColorLab.from_color(Color.BLACK)) < 15.0,
+			"coarse matching still finds a thread close to the pixel")
+	var again := PatternImporter.from_image(image, palette)
+	_check(again.cells == pattern.cells, "coarse matching is repeatable")
+
+
+## Work done in parts, as behind the loading hint, comes to the same as done in one go.
+func _test_import_in_parts() -> void:
+	var image := load("res://samples/hypsi_anhaenger.png") as Image
+	var palette := FlossPalette.dmc()
+	var job := PatternImporter.Job.new(image, palette, PackedStringArray(), {})
+	var parts := 1
+	while not job.run(0):  # A time long past: one row per call.
+		parts += 1
+	var whole := PatternImporter.from_image(image, palette)
+	_check(parts > 1, "an import can stop in between")
+	_check(job.pattern.cells == whole.cells and job.pattern.thread_codes == whole.thread_codes,
+			"an import in parts gives the same pattern")
+	var colors: Array[Color] = []
+	for code in whole.thread_codes:
+		colors.append(palette.find_code(code).color)
+	var scene := StitchScene.new()
+	scene.prepare_front(whole, colors, true, PackedByteArray())
+	parts = 1
+	while not scene.run_prepare(0):
+		parts += 1
+	var prepared := scene._prepared_buffer
+	_check(parts > 1, "the fabric can stop in between")
+	scene.set_pattern(whole, colors, true)
+	scene.set_states(PackedByteArray())
+	var other := StitchScene.new()
+	other.set_pattern(whole, colors, true)
+	other.set_states(PackedByteArray())
+	_check(scene._front.instance_count == whole.total_stitches() * 2 and prepared == other._front.buffer,
+			"fabric prepared in parts is the same as built at once")
+	_check(scene._prepared_pattern == null, "a prepared fabric is used only once")
+	scene.free()
+	other.free()
+
+
+func _test_image_formats() -> void:
+	var source := Image.create_empty(16, 16, false, Image.FORMAT_RGB8)
+	source.fill_rect(Rect2i(0, 0, 8, 16), Color8(200, 40, 40))
+	source.fill_rect(Rect2i(8, 0, 8, 16), Color8(40, 40, 200))
+	# 2 x 1 pixels of the same colours. BMP made with Pillow, TGA's smallest header by hand.
+	var bmp := "424d3e0000000000000036000000280000000200000001000000010018000000000008000000c40e0000c40e000000000000000000002828c8c828280000".hex_decode()
+	var tga := PackedByteArray([0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 1, 0, 24, 0x20,
+			40, 40, 200, 200, 40, 40])
+	var svg := '<?xml version="1.0"?><svg xmlns="http://www.w3.org/2000/svg" width="2" height="1"><rect width="1" height="1" fill="#c82828"/><rect x="1" width="1" height="1" fill="#2828c8"/></svg>'
+	var files := {
+		"a.png": source.save_png_to_buffer(),
+		"a.webp": source.save_webp_to_buffer(),
+		"a.jpg": source.save_jpg_to_buffer(1.0),
+		"a.bmp": bmp,
+		"a.tga": tga,
+		"a.svg": svg.to_utf8_buffer(),
+	}
+	for file_name: String in files:
+		var image := ImageReader.read(file_name, files[file_name])
+		_check(image != null, "%s can be read" % file_name)
+		if image != null:
+			# JPEG shifts colours a little, so only which side each one leans to counts.
+			var left := image.get_pixel(0, 0)
+			var right := image.get_pixel(image.get_width() - 1, 0)
+			_check(left.r > left.b and right.b > right.r, "%s has its colours" % file_name)
+	_check(ImageReader.read("named.txt", files["a.webp"]) != null, "the contents decide the format, not the name")
+	_check(ImageReader.read("a.png", PackedByteArray([1, 2, 3, 4, 5, 6, 7, 8])) == null, "not an image: null")
+	_check(ImageReader.read("a.png", PackedByteArray()) == null, "an empty file: null")
+	var pattern := PatternImporter.from_image(ImageReader.read("a.jpg", files["a.jpg"]), FlossPalette.dmc())
+	_check(pattern.total_stitches() == 16 * 16, "a JPEG without alpha is stitched in full")
+
+
+func _test_gif() -> void:
+	# Made with Pillow. 3 x 2: red, green, blue / transparent, red, green.
+	var plain := "47494638396103000200810000ff000000ff000000ff09090921f90401000003002c00000000030002000008080001041030406040003b".hex_decode()
+	_check(GifDecoder.canvas_size(plain) == Vector2i(3, 2), "the GIF's size is known up front")
+	var image := ImageReader.read("a.gif", plain)
+	_check(image != null and image.get_size() == Vector2i(3, 2), "a GIF can be read")
+	if image != null:
+		_check(image.get_pixel(0, 0) == Color8(255, 0, 0) and image.get_pixel(1, 0) == Color8(0, 255, 0)
+				and image.get_pixel(2, 0) == Color8(0, 0, 255) and image.get_pixel(1, 1) == Color8(255, 0, 0)
+				and image.get_pixel(2, 1) == Color8(0, 255, 0), "the GIF's colours")
+		_check(image.get_pixel(0, 1).a == 0.0, "the GIF's transparent colour stays empty")
+	# 1 x 5, interlaced: rows 10, 20, 30, 40, 50 of red, stored as 0, 4, 2, 1, 3.
+	var interlaced := "474946383761010005008200000a00001400001e00002800003200000000000000000000002c00000000010005000008080001041030804040003b".hex_decode()
+	image = ImageReader.read("a.gif", interlaced)
+	_check(image != null, "an interlaced GIF can be read")
+	if image != null:
+		for y in 5:
+			_check(image.get_pixel(0, y) == Color8((y + 1) * 10, 0, 0), "interlaced row %d is in place" % y)
+	_check(GifDecoder.canvas_size(PackedByteArray([1, 2, 3])) == Vector2i.ZERO, "no GIF, no size")
+	_check(ImageReader.read("a.gif", plain.slice(0, 20)) == null, "a cut off GIF: null")
 
 
 func _test_split_blocks() -> void:
@@ -1117,6 +1226,34 @@ func _test_light_orbit() -> void:
 	_check(highest - lowest > 20.0, "the light rises and sinks on its way: %s..%s" % [lowest, highest])
 	_check(lowest >= 54.9, "never lower than where it starts: %s" % lowest)
 	_check(not from_bottom_right, "never low from the bottom right")
+
+
+## Asking how far a project is doesn't plan its threads, which takes long on a big pattern.
+func _test_session_stays_unplanned() -> void:
+	var pattern := Pattern.new()
+	pattern.width = 3
+	pattern.height = 2
+	pattern.thread_codes = PackedStringArray(["310", "666"])
+	pattern.cells = PackedInt32Array([0, 0, Pattern.EMPTY, 1, 1, Pattern.EMPTY])
+	var session := StitchSession.new(pattern)
+	var saved := PackedByteArray([StitchSession.Cell.FULL, StitchSession.Cell.FULL, 0,
+			StitchSession.Cell.HALF, StitchSession.Cell.HALF, 0])
+	session.restore(saved)
+	_check(session.cell_states() == saved and session.finished_crosses() == 2
+			and session.is_thread_done(0) and not session.is_thread_done(1)
+			and session.has_stitches(1) and session.finished_crosses(1) == 0
+			and is_equal_approx(session.leg_progress(), 0.75) and is_equal_approx(session.leg_progress(1), 0.5)
+			and not session.is_finished(),
+			"progress is known from the saved states")
+	_check(not session.is_planned(0) and not session.is_planned(1), "without planning a thread")
+	session.steps(1)
+	_check(session.cell_states() == saved and session.is_planned(1) and not session.is_planned(0),
+			"planning one thread keeps the progress of both")
+	session.advance(1)
+	_check(session.is_finished() and session.finished_crosses() == 4 and session.is_thread_done(1), "the last stitch finishes it")
+	session.go_back(1)
+	_check(session.cell_states() == saved and not session.is_finished() and session.finished_crosses(1) == 0,
+			"going back takes it off again")
 
 
 func _test_leg_progress() -> void:

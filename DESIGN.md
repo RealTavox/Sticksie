@@ -11,7 +11,8 @@ Fadenoptik, flüssige Animationen, klare Führung.
 
 ## 1. Import: Pixelart → Muster
 
-- Der Nutzer lädt ein Pixelart-Bild (PNG). Ein Pixel = ein Kreuzstich.
+- Der Nutzer lädt ein Pixelart-Bild (PNG, JPEG, WebP, GIF, BMP, TGA oder SVG; bei GIF zählt das
+  erste Bild). Ein Pixel = ein Kreuzstich.
 - Jede Bildfarbe wird auf ein echtes Stickgarn abgebildet (Garnpalette DMC, 489 Farben), damit
   man weiß, welches Garn man braucht. Abgleich über Farbabstand im Lab-Farbraum (CIEDE2000).
   Bildfarben, die auf dasselbe Garn fallen, werden eine Farbe.
@@ -20,7 +21,13 @@ Fadenoptik, flüssige Animationen, klare Führung.
 - Transparente Pixel bleiben leer (Stoff). Zusätzlich kann man jede Farbe als **„Stoff“**
   markieren (z. B. einen Hintergrund), dann wird sie nicht gestickt. Das geht nur, solange in dem
   Projekt noch nichts gestickt ist.
-- Bilder mit mehr als 500 Pixeln pro Seite werden abgelehnt (vermutlich ein Foto).
+- Bilder mit mehr als 1000 Pixeln pro Seite werden abgelehnt.
+- Hat ein Bild sehr viele Farben (über 2048, z. B. ein Foto oder JPEG-Artefakte), werden die Farben
+  vor dem Abgleich gröber abgestuft, damit das Finden der Garne nicht minutenlang dauert.
+- Dauert das Laden länger, erscheint ein **Ladehinweis** über dem abgedunkelten Bildschirm: eine
+  Reihe Kreuze, die dänisch hin und zurück gestickt wird. Sie läuft nur, solange die App Bilder
+  zeichnen kann; blockiert die Arbeit das (Planen einer Farbe im Web, ohne Threads), steht dort
+  nur der Hinweis ohne Animation.
 - Ergebnis: Raster mit Garnfarbe pro Feld, Farbliste mit Anzahl Stichen pro Farbe.
 
 ## 2. Geführtes Sticken

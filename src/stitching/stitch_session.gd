@@ -56,6 +56,12 @@ var _manual_starts := {}  # thread index -> Array[Vector3i]
 ## Cell states that progress is taken over from (restore()), for each thread when it is planned:
 ## planning waits until a thread is needed, so changing several settings in a row plans only once.
 var _saved_states := PackedByteArray()
+## The cell states and, per thread, how many cells have one leg or both, kept from the last time
+## they were worked out, as big patterns ask for them on every step. _states is empty when they
+## have to be worked out again.
+var _states := PackedByteArray()
+var _half_cells := PackedInt32Array()
+var _full_cells := PackedInt32Array()
 
 
 func _init(p_pattern: Pattern) -> void:
@@ -71,7 +77,13 @@ func steps(thread: int) -> Array[StitchStep]:
 			_plans[thread] = StitchPlanner.plan(pattern, thread, top_to_bottom, start_left, max_skip,
 					english, whole_back, max_block, style)
 		_restore_thread(thread)
+		_states = PackedByteArray()
 	return _plans[thread]
+
+
+## Whether `thread` has its plan already; asking for its steps would plan it.
+func is_planned(thread: int) -> bool:
+	return _plans.has(thread)
 
 
 ## Number of finished steps of `thread`.
@@ -250,63 +262,95 @@ func restore_manual_starts(by_code: Dictionary) -> void:
 
 
 func has_progress() -> bool:
-	return cell_states().count(Cell.NONE) < pattern.cells.size()
+	_update_states()
+	return _states.count(Cell.NONE) < pattern.cells.size()
 
 
-## Number of whole crosses of `thread` already stitched.
-func finished_crosses(thread: int) -> int:
-	var count := 0
-	var all := steps(thread)
-	var flags := _flags(thread)
-	for i in all.size():
-		if flags[i] and all[i].kind != StitchStep.Kind.HALF:
-			count += all[i].cells.size()
-	return count
+## Whether any leg of `thread` is stitched.
+func has_stitches(thread: int) -> bool:
+	_update_states()
+	return _half_cells[thread] + _full_cells[thread] > 0
+
+
+## Number of whole crosses already stitched: of `thread`, or of every thread with -1.
+func finished_crosses(thread := -1) -> int:
+	_update_states()
+	return _states.count(Cell.FULL) if thread < 0 else _full_cells[thread]
+
+
+## Whether every stitch of `thread` is finished.
+func is_thread_done(thread: int) -> bool:
+	return finished_crosses(thread) == pattern.stitch_count(thread)
 
 
 ## Whether every colour is finished.
 func is_finished() -> bool:
-	for thread in pattern.thread_codes.size():
-		if current_step(thread) != null:
-			return false
-	return true
+	return finished_crosses() == pattern.total_stitches()
 
 
 ## Share of the legs stitched, 0..1: of `thread`, or of every thread with -1. A half stitch is
 ## one leg of the two of a cross, so every step moves it on.
 func leg_progress(thread := -1) -> float:
-	var states := cell_states()
-	var done := 0
-	var total := 0
-	for i in states.size():
-		var cell_thread := pattern.cells[i]
-		if cell_thread == Pattern.EMPTY or (thread >= 0 and cell_thread != thread):
-			continue
-		total += 2
-		done += states[i]  # Cell.HALF is 1 leg, Cell.FULL 2.
-	return float(done) / total if total > 0 else 0.0
+	_update_states()
+	var half: int = _states.count(Cell.HALF) if thread < 0 else _half_cells[thread]
+	var full := finished_crosses(thread)
+	var stitches := pattern.total_stitches() if thread < 0 else pattern.stitch_count(thread)
+	return float(half + full * 2) / (stitches * 2) if stitches > 0 else 0.0
 
 
-## Cell value per cell (row by row), from the finished steps of every thread.
+## Cell value per cell (row by row): from the finished steps of the planned threads, threads not
+## planned since restore() keep their saved states, so asking for them plans nothing.
 func cell_states() -> PackedByteArray:
-	for thread in pattern.thread_codes.size():
-		steps(thread)
-	return _carried_states()
+	_update_states()
+	return _states.duplicate()
 
 
-## Like cell_states(), but threads not planned since restore() keep their saved states instead of
-## being planned for it.
+## Works out what _states and the counts per thread say, if they aren't up to date.
+func _update_states() -> void:
+	if not _states.is_empty():
+		return
+	_states = _carried_states()
+	_half_cells.resize(pattern.thread_codes.size())
+	_half_cells.fill(0)
+	_full_cells.resize(pattern.thread_codes.size())
+	_full_cells.fill(0)
+	if _states.count(Cell.NONE) == _states.size():
+		return
+	for cell in _states.size():
+		if _states[cell] == Cell.HALF:
+			_half_cells[pattern.cells[cell]] += 1
+		elif _states[cell] == Cell.FULL:
+			_full_cells[pattern.cells[cell]] += 1
+
+
+## The newly finished `step` of `thread` on the fabric: its cells have at least its legs now.
+func _stitch_step(thread: int, step: StitchStep) -> void:
+	var value := Cell.HALF if step.kind == StitchStep.Kind.HALF else Cell.FULL
+	for x in step.cells:
+		var cell := step.row * pattern.width + x
+		var before := _states[cell]
+		if before >= value:
+			continue
+		_states[cell] = value
+		if before == Cell.HALF:
+			_half_cells[thread] -= 1
+		if value == Cell.HALF:
+			_half_cells[thread] += 1
+		else:
+			_full_cells[thread] += 1
+
+
+## The cell states from the finished steps, for threads without a plan from the saved states.
 func _carried_states() -> PackedByteArray:
 	var states := PackedByteArray()
 	states.resize(pattern.width * pattern.height)
 	states.fill(Cell.NONE)
-	for thread in pattern.thread_codes.size():
-		if not _plans.has(thread):
-			if not _saved_states.is_empty():
-				for cell in states.size():
-					if pattern.cells[cell] == thread:
-						states[cell] = _saved_states[cell]
-			continue
+	if _plans.size() < pattern.thread_codes.size() and _saved_states.count(Cell.NONE) < _saved_states.size():
+		for cell in states.size():
+			var cell_thread := pattern.cells[cell]
+			if cell_thread != Pattern.EMPTY and not _plans.has(cell_thread):
+				states[cell] = _saved_states[cell]
+	for thread: int in _plans:
 		var all: Array[StitchStep] = _plans[thread]
 		var flags: PackedByteArray = _done[thread]
 		for i in all.size():
@@ -327,6 +371,7 @@ func restore(saved_states: PackedByteArray) -> void:
 	_plans.clear()
 	_done.clear()
 	_saved_states = saved_states
+	_states = PackedByteArray()
 
 
 ## Takes progress over from the saved states for the newly planned `thread`.
@@ -373,6 +418,10 @@ func _set_flag(thread: int, index: int, value: int) -> void:
 	var flags := _flags(thread)
 	flags[index] = value
 	_done[thread] = flags
+	if value == 1 and not _states.is_empty():
+		_stitch_step(thread, _plans[thread][index])
+	else:
+		_states = PackedByteArray()
 
 
 func _previous_done(thread: int) -> int:

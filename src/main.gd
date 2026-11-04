@@ -13,7 +13,7 @@ extends Control
 ## bottom-right), `--settings` opens the settings dialog (`--advanced`: with the advanced part open),
 ## `--method=<english|danish>` sets the stitch method, `--back-pass=<whole|blocks>` the Danish
 ## return pass, `--max-block=<n>` the most stitches per block, `--needle=<auto|bottom|top>` and
-## `--first-leg=<slash|backslash>` the stitch style (bottom/top/first-leg fix it), `--projects` the project list, `--legal` the Impressum & Datenschutz window (`--legal-notices`: with the licence texts open), `--stitch=<code>` starts stitching that thread, `--steps=<n>` confirms n steps, `--back` shows the back while stitching, `--screenshot=<png path>` saves a screenshot after a few
+## `--first-leg=<slash|backslash>` the stitch style (bottom/top/first-leg fix it), `--projects` the project list, `--legal` the Impressum & Datenschutz window (`--legal-notices`: with the licence texts open), `--stitch=<code>` starts stitching that thread, `--steps=<n>` confirms n steps, `--back` shows the back while stitching, `--loading=<text>` or `--loading=still,<text>` holds the loading hint, `--screenshot=<png path>` saves a screenshot after a few
 ## frames and quits (`--wait=<seconds>` waits that much longer, e.g. into an animation).
 ## `--keys=<key>[:<seconds>],…` presses keys one after the other (held that long), after the steps.
 ## `--finish` stitches the rest of the `--stitch` colour (the celebration comes in),
@@ -31,7 +31,15 @@ extends Control
 
 const SAMPLE_PATH := "res://samples/hypsi_anhaenger.png"
 ## Images bigger than this on either side are refused (most likely a photo, not pixel art).
-const MAX_SIDE := 500
+const MAX_SIDE := 1000
+## Big work gets done in parts this long (microseconds), so the loading hint keeps moving.
+const LOADING_SLICE_USEC := 25000
+## From how many stitches a pattern's changes show the hint at once and a thread is planned apart
+## from the frames.
+const BIG_PATTERN_STITCHES := 40000
+const BIG_THREAD_STITCHES := 5000
+## A project file of this size (bytes) takes noticeably long to read.
+const BIG_PROJECT_BYTES := 500000
 const BUTTON_HEIGHT := 48.0
 ## Length of the needle on the stitch button of each colour.
 const NEEDLE_ICON_PX := 96
@@ -210,6 +218,7 @@ var _picker_tween: Tween
 var _color_list: VBoxContainer
 var _stitch_panel: StitchPanel
 var _files: FileExchange
+var _loading: LoadingHint
 ## Whether the browser was asked to keep the projects this session (BrowserStorage.request()).
 var _storage_requested := false
 ## Progress of the colour being stitched, or of the whole project in the overview.
@@ -258,7 +267,7 @@ func _ready() -> void:
 	if not opens_image:
 		var last := ProjectStore.last_project_path()
 		if not last.is_empty() and FileAccess.file_exists(last):
-			_open_project(last)
+			await _open_project(last)
 	if BrowserStorage.safety == BrowserStorage.Safety.NOT_KEPT:
 		_show_message(BrowserStorage.warning())
 	_handle_cmdline()
@@ -289,7 +298,7 @@ func _build_ui() -> void:
 	_toolbar.add_child(_make_toolbar_button("Einstellungen", _show_settings, ButtonIcons.Icon.GEAR, false))
 	_toolbar.add_child(_make_toolbar_button("Impressum & Datenschutz", _show_legal, ButtonIcons.Icon.INFO, false))
 	_info_label = Label.new()
-	_info_label.text = "Öffne ein Pixelart-Bild (PNG). Ein Pixel wird ein Kreuzstich."
+	_info_label.text = "Öffne ein Pixelart-Bild. Ein Pixel wird ein Kreuzstich."
 	_info_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 
 	_view = PatternView.new()
@@ -371,6 +380,8 @@ func _build_ui() -> void:
 	_legal_window = LegalWindow.new()
 	_legal_window.closed.connect(_restore_overlays)
 	add_child(_legal_window)
+	_loading = LoadingHint.new()
+	add_child(_loading)
 
 
 ## The pattern on the whole screen, the progress bar and the overlay panels above it: the menu
@@ -1320,35 +1331,64 @@ func _process(delta: float) -> void:
 
 
 func _open_image(path: String) -> void:
-	var image: Image
 	if path.begins_with("res://"):
-		image = load(path) as Image
+		await _start_project(path.get_file().get_basename(), load(path) as Image)
 	else:
-		image = Image.load_from_file(path)
-	_start_project(path.get_file().get_basename(), image)
+		await _open_image_data(path.get_file(), FileAccess.get_file_as_bytes(path))
 
 
-## A PNG the user picked: on the web its bytes are all the app gets.
+## An image file the user picked: on the web its bytes are all the app gets.
 func _open_image_data(file_name: String, bytes: PackedByteArray) -> void:
-	var image := Image.new()
-	if image.load_png_from_buffer(bytes) != OK:
-		image = null
-	_start_project(file_name.get_basename(), image)
+	# The canvas of a GIF, which is decoded here in the app, is checked before it takes the time.
+	if not _is_too_big(GifDecoder.canvas_size(bytes)):
+		await _start_project(file_name.get_basename(), ImageReader.read(file_name, bytes))
+
+
+## Calls `step` with the time to stop at until it says it is done, drawing frames in between.
+func _work_off(step: Callable) -> void:
+	var slice := LOADING_SLICE_USEC
+	while not step.call(Time.get_ticks_usec() + slice):
+		slice = await _next_slice()
+
+
+## Waits for the next frame and returns how long the next part of the work may take: as long as
+## the wait took, if that was long, so slow frames (a window that is covered, a weak device) don't
+## make the work take many times as long.
+func _next_slice() -> int:
+	var waiting_since := Time.get_ticks_usec()
+	await get_tree().process_frame
+	return maxi(LOADING_SLICE_USEC, Time.get_ticks_usec() - waiting_since)
 
 
 ## A new project from the pixel art `image` (null if it couldn't be read), saved right away.
 func _start_project(project_name: String, image: Image) -> void:
 	if image == null or image.is_empty():
-		_show_message("Bild konnte nicht geladen werden. Es muss ein PNG sein.")
+		_show_message("Bild konnte nicht geladen werden. Es muss ein %s sein." % ImageReader.FORMAT_NAMES)
 		return
-	if image.get_width() > MAX_SIDE or image.get_height() > MAX_SIDE:
-		_show_message("Bild ist zu groß (%d × %d), höchstens %d Pixel pro Seite." % [
-				image.get_width(), image.get_height(), MAX_SIDE])
+	if _is_too_big(image.get_size()):
 		return
 	if image.is_compressed():
 		image.decompress()
-	_set_project(StitchProject.create(project_name, image, _palette))
+	if _loading.active:
+		return
+	_loading.begin("Muster wird erstellt …")
+	var job := PatternImporter.Job.new(image, _palette, PackedStringArray(), {})
+	await _work_off(job.run)
+	var project := StitchProject.new()
+	project.name = project_name
+	project.image = image
+	project.take_pattern(job.pattern)
+	await _set_project(project)
 	_save()
+	_loading.finish()
+
+
+## Whether an image of `size` is over the limit; tells the user if so.
+func _is_too_big(size: Vector2i) -> bool:
+	if maxi(size.x, size.y) <= MAX_SIDE:
+		return false
+	_show_message("Bild ist zu groß (%d × %d), höchstens %d Pixel pro Seite." % [size.x, size.y, MAX_SIDE])
+	return true
 
 
 ## The file picker for a new image. The app's own dialog keeps the touch overlays out of the way
@@ -1379,8 +1419,12 @@ func _import_project(file_name: String, bytes: PackedByteArray) -> void:
 		return
 	if _project_browser.is_open():
 		_project_browser.close()
-	_set_project(project)
+	if _loading.active:
+		return
+	_loading.begin("Projekt wird geöffnet …")
+	await _set_project(project)
 	_save()
+	_loading.finish()
 
 
 ## Files dragged onto the window (on a computer, also in the browser): an image starts a project,
@@ -1503,12 +1547,20 @@ func _apply_style() -> void:
 
 
 func _open_project(path: String) -> void:
+	if _loading.active:
+		return
+	_loading.begin("Projekt wird geöffnet …")
+	var file := FileAccess.open(path, FileAccess.READ)
+	if file != null and file.get_length() >= BIG_PROJECT_BYTES:
+		await _loading.wait_until_drawn()
 	var project := ProjectStore.load_project(path)
 	if project == null:
+		_loading.finish()
 		_show_message("Projekt konnte nicht geladen werden.")
 		return
-	_set_project(project)
+	await _set_project(project)
 	ProjectStore.remember_last(path)
+	_loading.finish()
 
 
 func _set_project(project: StitchProject) -> void:
@@ -1521,7 +1573,7 @@ func _set_project(project: StitchProject) -> void:
 		BrowserStorage.request()
 	_apply_preferences()
 	_full_pattern = project.full_pattern(_palette)
-	_show_pattern(false)
+	await _show_pattern_in_parts(false)
 	_open_overview_panels()
 
 
@@ -1530,6 +1582,26 @@ func _show_pattern(keep_view: bool) -> void:
 	_show_info()
 	_fill_color_list()
 	_update_progress()
+
+
+## Like _show_pattern(), for a whole new pattern: big ones go in parts while the hint shows.
+func _show_pattern_in_parts(keep_view: bool) -> void:
+	_view.prepare(_project.pattern, _palette)
+	await _work_off(_view.run_prepare)
+	_view.show_pattern(_project.pattern, _palette, keep_view)
+	_show_info()
+	await _fill_color_list_in_parts()
+	_update_progress()
+
+
+## A change of colours has made a new pattern: shows it and saves.
+func _show_changed_pattern() -> void:
+	if _loading.active:
+		return
+	_loading.begin("Muster wird erstellt …")
+	await _show_pattern_in_parts(true)
+	_save()
+	_loading.finish()
 
 
 ## Saves the project; called after every change, so nothing is lost when the app closes.
@@ -1585,6 +1657,11 @@ func _on_project_deleted(path: String) -> void:
 
 ## One row per thread of the image, most stitches first.
 func _fill_color_list() -> void:
+	_fill_color_list_in_parts(PatternImporter.Job.NO_LIMIT)
+
+
+## With `until_usec`, the time the first part ends; later parts take LOADING_SLICE_USEC.
+func _fill_color_list_in_parts(until_usec := Time.get_ticks_usec() + LOADING_SLICE_USEC) -> void:
 	for child in _color_list.get_children():
 		child.queue_free()
 	_strikes.clear()
@@ -1594,6 +1671,9 @@ func _fill_color_list() -> void:
 	for i: int in order:
 		var floss := _palette.find_code(_full_pattern.thread_codes[i])
 		_color_list.add_child(_make_color_row(floss, counts[i]))
+		if Time.get_ticks_usec() >= until_usec:
+			var slice := await _next_slice()
+			until_usec = Time.get_ticks_usec() + slice
 
 
 func _make_color_row(floss: FlossColor, count: int) -> Control:
@@ -1617,13 +1697,13 @@ func _make_color_row(floss: FlossColor, count: int) -> Control:
 	name_label.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	row.add_child(name_label)
 	swatch.pressed.connect(_open_picker.bind(floss, swatch, name_label))
-	if thread >= 0 and session.current_step(thread) == null:
+	if thread >= 0 and session.is_thread_done(thread):
 		var strike := StrikeLine.new(name_label, floss.code != _strike_code)
 		code_label.add_child(strike)
 		_strikes[floss.code] = strike
 	var count_label := Label.new()
 	count_label.text = str(count)
-	if thread >= 0 and session.done_count(thread) > 0:
+	if thread >= 0 and session.has_stitches(thread):
 		count_label.text = "%d / %d" % [session.finished_crosses(thread), count]
 	count_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	count_label.custom_minimum_size.x = 56.0
@@ -1650,7 +1730,7 @@ func _make_color_row(floss: FlossColor, count: int) -> Control:
 	stitch_button.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	stitch_button.focus_mode = Control.FOCUS_NONE
 	stitch_button.disabled = thread < 0
-	stitch_button.pressed.connect(_enter_stitching.bind(thread))
+	stitch_button.pressed.connect(_start_stitching.bind(thread))
 	OverlayWindow.make_primary(stitch_button)
 	row.add_child(stitch_button)
 	# A left-out colour stays fabric: the whole row fades, only the box stays clear to undo it.
@@ -1726,8 +1806,7 @@ func _close_picker(old_code: String, new_code: String) -> void:
 		_project.replace_color(old_code, new_code, _palette)
 		_apply_preferences()
 		_full_pattern = _project.full_pattern(_palette)
-		_show_pattern(true)
-		_save()
+		_show_changed_pattern()
 	else:
 		_fill_color_list()
 	var width := _list_host.size.x
@@ -1764,8 +1843,43 @@ func _on_fabric_toggled(pressed: bool, code: String) -> void:
 	_project.fabric_codes = fabric_codes
 	_project.rebuild(_palette)
 	_apply_preferences()
-	_show_pattern(true)
-	_save()
+	_show_changed_pattern()
+
+
+## Gets ready to stitch `thread`, with the loading hint on a big pattern, then enters it.
+func _start_stitching(thread: int) -> void:
+	if _loading.active:
+		return
+	var session := _project.session
+	var big_plan := not session.is_planned(thread) and _project.pattern.stitch_count(thread) >= BIG_THREAD_STITCHES
+	var big_pattern := _project.pattern.total_stitches() >= BIG_PATTERN_STITCHES
+	if big_plan or big_pattern:
+		_loading.begin("Stichfolge wird geplant …")
+	if big_plan:
+		await _plan_thread(thread)
+	if big_pattern:
+		_loading.update("Muster wird vorbereitet …")
+		# Stitched cells only, instead of changing every cell of the finished preview.
+		_view.prepare(_project.pattern, _palette, session.cell_states())
+		await _work_off(_view.run_prepare)
+	_loading.finish()
+	_enter_stitching(thread)
+
+
+## Plans `thread` on a thread of its own, so frames go on, or where there are no threads (a web
+## export) with the hint standing still.
+func _plan_thread(thread: int) -> void:
+	var session := _project.session
+	if not OS.has_feature("threads"):
+		_loading.update("Stichfolge wird geplant …", false)
+		await _loading.wait_until_drawn()
+		session.steps(thread)
+		return
+	var worker := Thread.new()
+	worker.start(session.steps.bind(thread))
+	while worker.is_alive():
+		await get_tree().process_frame
+	worker.wait_to_finish()
 
 
 ## The stitching page slides in from the right over a picture of the overview, which a swipe
@@ -1795,6 +1909,16 @@ func _slide_to_overview() -> void:
 	if _stitch_thread < 0 or _view.is_page_sliding():
 		return
 	await _view.slide_back()
+	await _return_to_overview()
+
+
+## Back to the overview, with the loading hint on a big pattern.
+func _return_to_overview() -> void:
+	if _project.pattern.total_stitches() >= BIG_PATTERN_STITCHES and not _loading.active:
+		_loading.begin("Muster wird vorbereitet …")
+		_view.prepare(_project.pattern, _palette)
+		await _work_off(_view.run_prepare)
+		_loading.finish()
 	_leave_stitching()
 
 
@@ -1930,10 +2054,10 @@ func _celebrate() -> void:
 	_celebration.dismissed.connect(func() -> void:
 		_celebration = null
 		_loop_light(false)
-		_leave_stitching())
+		_return_to_overview())
 	_loop_light(true)
 	_celebration.play(_palette.find_code(_project.pattern.thread_codes[thread]),
-			_project.pattern.stitch_counts()[thread], _progress.color, _progress.bar_rect())
+			_project.pattern.stitch_count(thread), _progress.color, _progress.bar_rect())
 
 
 func _refresh_stitching() -> void:
@@ -1971,7 +2095,7 @@ func _refresh_stitching() -> void:
 	var floss := _palette.find_code(pattern.thread_codes[thread])
 	_stitch_panel.show_step(floss, step, position_text, session.done_count(thread),
 			session.steps(thread).size(), session.finished_crosses(thread),
-			pattern.stitch_counts()[thread], thread_start)
+			pattern.stitch_count(thread), thread_start)
 	_symbols.show_step(step, hint, _style, new_thread, thread_end.x >= 0)
 	_update_symbols()
 	_info_label.text = ""
@@ -1998,6 +2122,10 @@ func _show_back(step: StitchStep) -> void:
 	var starts := PackedVector2Array()
 	var ends := PackedVector2Array()
 	for thread in _project.pattern.thread_codes.size():
+		# A thread nothing is stitched of has no back yet and needn't be planned for it.
+		if not session.has_stitches(thread):
+			lines.append(PackedVector2Array())
+			continue
 		lines.append(BackSide.thread_segments(session, thread, _style))
 		var marks := BackSide.thread_ends(session, thread, _style)
 		starts.append_array(marks.starts)
@@ -2047,6 +2175,7 @@ func _on_view_tapped() -> void:
 func _handle_cmdline() -> void:
 	var screenshot_path := ""
 	var stitch_code := ""
+	var loading_text := ""
 	var steps := 0
 	var back := false
 	var flip := -1.0
@@ -2065,10 +2194,13 @@ func _handle_cmdline() -> void:
 	var keys := PackedStringArray()
 	for arg in OS.get_cmdline_user_args():
 		if arg.begins_with("--open="):
-			_open_image(arg.trim_prefix("--open="))
+			await _open_image(arg.trim_prefix("--open="))
 		elif arg.begins_with("--import="):
 			var import_path := arg.trim_prefix("--import=")
-			_import_project(import_path.get_file(), FileAccess.get_file_as_bytes(import_path))
+			await _import_project(import_path.get_file(), FileAccess.get_file_as_bytes(import_path))
+		elif arg.begins_with("--loading="):
+			# Holds the hint for a screenshot: <text>, or still,<text> for the version without animation.
+			loading_text = arg.trim_prefix("--loading=")
 		elif arg.begins_with("--export="):
 			if _project != null:
 				_files.write_text(arg.trim_prefix("--export="), FileAccess.get_file_as_string(_project.path))
@@ -2184,7 +2316,7 @@ func _handle_cmdline() -> void:
 			screenshot_path = arg.trim_prefix("--screenshot=")
 	if not stitch_code.is_empty() and _project != null and _project.pattern.thread_codes.has(stitch_code):
 		await get_tree().process_frame  # Let the screen lay out first, as before a real tap.
-		_enter_stitching(_project.pattern.thread_codes.find(stitch_code))
+		await _start_stitching(_project.pattern.thread_codes.find(stitch_code))
 		for i in steps:
 			_next_step()
 		if finish:
@@ -2262,6 +2394,11 @@ func _handle_cmdline() -> void:
 		await get_tree().process_frame
 	# Low processor mode draws only when something changed, so ask for one more frame.
 	queue_redraw()
+	if not loading_text.is_empty():
+		var still := loading_text.begins_with("still,")
+		_loading.begin(loading_text.trim_prefix("still,"), not still, true)
+		await get_tree().create_timer(0.7).timeout
+		_loading.queue_redraw()  # Still, it draws nothing by itself.
 	await RenderingServer.frame_post_draw
 	get_viewport().get_texture().get_image().save_png(screenshot_path)
 	get_tree().quit()

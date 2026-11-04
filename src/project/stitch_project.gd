@@ -32,12 +32,19 @@ static func create(p_name: String, p_image: Image, palette: FlossPalette) -> Sti
 ## Rebuilds the pattern from the image and the fabric choice. Starts a new session, so earlier
 ## progress is gone.
 func rebuild(palette: FlossPalette) -> void:
-	pattern = PatternImporter.from_image(image, palette, fabric_codes, replacements)
+	take_pattern(PatternImporter.from_image(image, palette, fabric_codes, replacements))
+
+
+## Uses `new_pattern`, made from the image, with a new session.
+func take_pattern(new_pattern: Pattern) -> void:
+	pattern = new_pattern
 	session = StitchSession.new(pattern)
 
 
 ## The pattern with every colour of the image, fabric colours included.
 func full_pattern(palette: FlossPalette) -> Pattern:
+	if fabric_codes.is_empty():
+		return pattern
 	return PatternImporter.from_image(image, palette, PackedStringArray(), replacements)
 
 
@@ -83,10 +90,7 @@ func replace_color(old_code: String, new_code: String, palette: FlossPalette) ->
 
 ## Whole crosses stitched, over all threads.
 func finished_crosses() -> int:
-	var total := 0
-	for thread in pattern.thread_codes.size():
-		total += session.finished_crosses(thread)
-	return total
+	return session.finished_crosses()
 
 
 ## The saved form. The pattern is stored as well as the image, so a later change of the thread
@@ -96,7 +100,7 @@ func finished_crosses() -> int:
 func to_dict() -> Dictionary:
 	var done := {}
 	for thread in pattern.thread_codes.size():
-		if session.done_count(thread) > 0:
+		if session.is_planned(thread) and session.done_count(thread) > 0:
 			done[pattern.thread_codes[thread]] = session.done_count(thread)
 	return {
 		"format": FORMAT,

@@ -190,6 +190,20 @@ func _init() -> void:
 	add_child(_viewport)
 
 
+## Starts working out the fabric of `p` with `states` (empty: every cell a finished cross) for the
+## show_pattern() or show_progress() that follows; run_prepare() does the work in parts.
+func prepare(p: Pattern, palette: FlossPalette, states := PackedByteArray()) -> void:
+	var colors: Array[Color] = []
+	for code in p.thread_codes:
+		colors.append(palette.find_code(code).color)
+	_scene.prepare_front(p, colors, style.slash_first, states)
+
+
+## Works until the time `until_usec` (Time.get_ticks_usec()) has passed; true when done.
+func run_prepare(until_usec: int) -> bool:
+	return _scene.run_prepare(until_usec)
+
+
 ## Shows `p` in preview mode; with `keep_view` the zoom and position stay as they are.
 func show_pattern(p: Pattern, palette: FlossPalette, keep_view := false) -> void:
 	pattern = p
